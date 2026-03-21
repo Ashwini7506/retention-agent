@@ -193,7 +193,9 @@ export const UserActivityWidget = React.forwardRef<HTMLDivElement, UserActivityW
                   <span className="text-3xl font-bold text-white">
                     <AnimatedNumber value={dau} />
                   </span>
-                  <span className="ml-1.5 text-sm text-indigo-400">users today</span>
+                  <span className="ml-1.5 text-sm text-indigo-400">
+                    {date ? `on ${date}` : "users today"}
+                  </span>
                 </div>
 
                 {/* Avatar stack */}
@@ -231,7 +233,7 @@ export const UserActivityWidget = React.forwardRef<HTMLDivElement, UserActivityW
                 )}
 
                 {topUsers.length === 0 && (
-                  <p className="text-xs text-indigo-800">No events today yet</p>
+                  <p className="text-xs text-indigo-800">No events on this day</p>
                 )}
               </CardContent>
             </Card>

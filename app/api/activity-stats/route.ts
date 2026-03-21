@@ -36,7 +36,7 @@ export async function GET() {
 
   const { data: events, error } = await db
     .from("raw_events")
-    .select("distinct_id, event_name, occurred_at, category, properties")
+    .select("distinct_id, event_name, occurred_at, event_category, properties")
     .gte("occurred_at", dayStart)
     .lte("occurred_at", dayEnd);
 
@@ -111,7 +111,7 @@ export async function GET() {
   // Category breakdown (% of events by category)
   const catCounts: Record<string, number> = {};
   for (const e of evs) {
-    const cat = e.category ?? "Other";
+    const cat = e.event_category ?? "Other";
     catCounts[cat] = (catCounts[cat] ?? 0) + 1;
   }
   const total = evs.length || 1;
