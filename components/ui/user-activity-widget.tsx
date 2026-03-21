@@ -180,64 +180,6 @@ export const UserActivityWidget = React.forwardRef<HTMLDivElement, UserActivityW
             </Card>
           </motion.div>
 
-          {/* DAU card */}
-          <motion.div variants={item} whileHover={{ scale: 1.025, y: -4 }} transition={spring}>
-            <Card className="h-full bg-indigo-950/40 border-indigo-800/40 rounded-xl">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-medium text-indigo-300">Daily Active Users</p>
-                  <Users className="w-4 h-4 text-indigo-400" />
-                </div>
-
-                <div className="mb-5">
-                  <span className="text-3xl font-bold text-white">
-                    <AnimatedNumber value={dau} />
-                  </span>
-                  <span className="ml-1.5 text-sm text-indigo-400">
-                    {date ? `on ${date}` : "users today"}
-                  </span>
-                </div>
-
-                {/* Avatar stack */}
-                {topUsers.length > 0 && (
-                  <div className="flex -space-x-2">
-                    {topUsers.slice(0, 5).map((user, i) => (
-                      <motion.div
-                        key={user.id}
-                        title={`${user.event_count} events`}
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.4, delay: 0.7 + i * 0.08 }}
-                        whileHover={{ scale: 1.2, zIndex: 10, y: -2 }}
-                      >
-                        <Avatar className="border-2 border-indigo-900 w-8 h-8">
-                          <AvatarFallback className="bg-indigo-800 text-indigo-200 text-[10px]">
-                            {user.initials}
-                          </AvatarFallback>
-                        </Avatar>
-                      </motion.div>
-                    ))}
-                    {dau > 5 && (
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ duration: 0.4, delay: 1.1 }}
-                        className="w-8 h-8 rounded-full border-2 border-indigo-900 bg-indigo-800/60 flex items-center justify-center"
-                      >
-                        <span className="text-[9px] text-indigo-300 font-medium">
-                          +{dau - 5}
-                        </span>
-                      </motion.div>
-                    )}
-                  </div>
-                )}
-
-                {topUsers.length === 0 && (
-                  <p className="text-xs text-indigo-800">No events on this day</p>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
         </div>
 
         {/* CTA banner */}

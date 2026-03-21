@@ -8,6 +8,22 @@ import { supabaseAdmin } from "@/lib/supabase";
 //  - top active users by event count (for avatar stack)
 //  - DAU count
 
+// Same in-app events as dashboard DAU so both numbers match
+const IN_APP = new Set([
+  "viewed_dashboard_page", "extension_page_viewed", "extension_page_extension_installed",
+  "ai_onboarding_modal_listen_screen_viewed", "ai_onboarding_modal_start_listening_clicked",
+  "ai_onboarding_modal_suggestion_card_clicked", "ai_onboarding_modal_extension_screen_viewed",
+  "post_onboarding_modal_tour_modal_opened", "post_onboarding_modal_card_selected",
+  "viewed_watchlist_details_page", "viewed_reddit_watchlist_details_page",
+  "viewed_lists_page", "prompt_flow_completed", "prompt_loading_modal_shown",
+  "filter_label_used", "filter_show_interactions_used", "filter_posted_date_used",
+  "watchlist_sidebar_clicked",
+  "payment_modal_modal_viewed", "payment_modal_plan_viewed",
+  "payment_modal_payment_button_clicked", "payment_modal_trial_button_clicked",
+  "payment_modal_checkout_completed", "ai_onboarding_modal_billing_screen_shown",
+  "post_onboarding_modal_billing_screen_shown",
+]);
+
 export async function GET() {
   const db = supabaseAdmin();
 
@@ -57,8 +73,8 @@ export async function GET() {
     return { ...e, device_id };
   });
 
-  // DAU = distinct resolved device_ids on this day
-  const userSet = new Set(evs.map((e) => e.device_id));
+  // DAU = distinct resolved device_ids with in-app events (matches dashboard DAU tile)
+  const userSet = new Set(evs.filter((e) => IN_APP.has(e.event_name)).map((e) => e.device_id));
   const dau = userSet.size;
 
   // Avg session duration: for each user, span = max(occurred_at) - min(occurred_at)
