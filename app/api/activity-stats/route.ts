@@ -44,22 +44,33 @@ export async function GET() {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  const evs = events ?? [];
+  const rawEvs = events ?? [];
 
-  // DAU = distinct users on this day
-  const userSet = new Set(evs.map((e) => e.distinct_id));
+  // Resolve device_id: identified users group by distinct_id, anonymous by Device ID
+  const evs = rawEvs.map((e) => {
+    const p: Record<string, string> = e.properties
+      ? typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties
+      : {};
+    const device_id = e.distinct_id.startsWith("$device:")
+      ? (p["Device ID"] || e.distinct_id).trim()
+      : e.distinct_id;
+    return { ...e, device_id };
+  });
+
+  // DAU = distinct resolved device_ids on this day
+  const userSet = new Set(evs.map((e) => e.device_id));
   const dau = userSet.size;
 
   // Avg session duration: for each user, span = max(occurred_at) - min(occurred_at)
   const userTimes: Record<string, { min: number; max: number; count: number }> = {};
   for (const e of evs) {
     const t = new Date(e.occurred_at).getTime();
-    if (!userTimes[e.distinct_id]) {
-      userTimes[e.distinct_id] = { min: t, max: t, count: 0 };
+    if (!userTimes[e.device_id]) {
+      userTimes[e.device_id] = { min: t, max: t, count: 0 };
     }
-    if (t < userTimes[e.distinct_id].min) userTimes[e.distinct_id].min = t;
-    if (t > userTimes[e.distinct_id].max) userTimes[e.distinct_id].max = t;
-    userTimes[e.distinct_id].count++;
+    if (t < userTimes[e.device_id].min) userTimes[e.device_id].min = t;
+    if (t > userTimes[e.device_id].max) userTimes[e.device_id].max = t;
+    userTimes[e.device_id].count++;
   }
 
   const sessionSpans = Object.values(userTimes)
@@ -136,14 +147,14 @@ export async function GET() {
   // Top active users by event count (for avatar stack)
   const userEventCount: Record<string, number> = {};
   for (const e of evs) {
-    userEventCount[e.distinct_id] = (userEventCount[e.distinct_id] ?? 0) + 1;
+    userEventCount[e.device_id] = (userEventCount[e.device_id] ?? 0) + 1;
   }
   const top_users = Object.entries(userEventCount)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
-    .map(([distinct_id, count]) => ({
-      id: distinct_id,
-      initials: distinct_id.slice(0, 2).toUpperCase(),
+    .map(([device_id, count]) => ({
+      id: device_id,
+      initials: device_id.slice(0, 2).toUpperCase(),
       event_count: count,
     }));
 
