@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   Dashboard,
   Analytics,
@@ -12,9 +12,7 @@ import {
   TestTool as Experiment,
   FunnelSort as FunnelChart,
   UserActivity,
-  Logout,
 } from "@carbon/icons-react";
-import { createClient } from "@/lib/supabase/client";
 
 /* ─── Logo ─────────────────────────────────────────────────────────────── */
 
@@ -169,13 +167,6 @@ function NavLink({ item, active }: { item: NavItemT; active: boolean }) {
 
 function NavPanel({ activeAgent }: { activeAgent: string }) {
   const pathname = usePathname();
-  const router   = useRouter();
-
-  async function signOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-  }
   const agent = AGENTS.find((a) => a.id === activeAgent)!;
   const navItems = activeAgent === "retention" ? RETENTION_NAV : [];
 
@@ -206,13 +197,6 @@ function NavPanel({ activeAgent }: { activeAgent: string }) {
             <p className="text-xs font-medium text-neutral-200 truncate">OutX.AI</p>
             <p className="text-[11px] text-neutral-600 truncate">Internal Tool</p>
           </div>
-          <button
-            onClick={signOut}
-            title="Sign out"
-            className="text-neutral-600 hover:text-neutral-300 transition-colors p-1 rounded hover:bg-neutral-800"
-          >
-            <Logout size={14} />
-          </button>
         </div>
       </div>
     </aside>
