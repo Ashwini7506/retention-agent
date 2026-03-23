@@ -137,47 +137,106 @@ export async function POST(req: Request) {
 
   const db = supabaseAdmin();
 
-  // ── 1. Fetch all raw events for this user ────────────────────────────────
-  const { data: rawEvents, error: evErr } = await db
-    .from("raw_events")
-    .select("distinct_id, event_name, occurred_at, properties")
-    .order("occurred_at", { ascending: true });
+  // ── 1. Fetch snapshot for this user (to get canonical distinct_id) ────────
+  let snapshotRow: Record<string, unknown> | null = null;
+  if (device_id) {
+    const { data } = await db.from("user_snapshots").select("*").eq("distinct_id", device_id).single();
+    snapshotRow = data;
+  }
+  if (!snapshotRow && email) {
+    const { data } = await db.from("user_snapshots").select("*").eq("email", email).limit(1).single();
+    snapshotRow = data;
+  }
 
-  if (evErr) return Response.json({ error: evErr.message }, { status: 500 });
+  const canonicalId: string | null = (snapshotRow?.distinct_id as string) ?? device_id ?? null;
 
-  // Filter to this user's events
-  const userEvents = (rawEvents ?? []).filter((e) => {
-    if (device_id && e.distinct_id === device_id) return true;
-    if (email) {
-      const p: Record<string, string> = e.properties
-        ? typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties
-        : {};
-      if (p["$email"]?.toLowerCase() === email.toLowerCase()) return true;
-      if (p["email"]?.toLowerCase() === email.toLowerCase()) return true;
+  // ── 2. Fetch this user's raw events (filtered by distinct_id) ────────────
+  let userEvents: { event_name: string; occurred_at: string }[] = [];
+  if (canonicalId) {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("raw_events")
+        .select("event_name, occurred_at")
+        .eq("distinct_id", canonicalId)
+        .order("occurred_at", { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error || !data) break;
+      userEvents.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
     }
-    return false;
-  });
+  }
 
-  // ── 2. Extract key moments ────────────────────────────────────────────────
-  const moments = {
-    accountCreated:  userEvents[0]?.occurred_at ?? null,
-    lastSeen:        userEvents[userEvents.length - 1]?.occurred_at ?? null,
-    firstLogin:      userEvents.find((e) => LOGIN_EVENTS.has(e.event_name))?.occurred_at ?? null,
-    pluginInvoked:   userEvents.filter((e) => PLUGIN_EVENTS.has(e.event_name)),
-    watchlistEvents: userEvents.filter((e) => WATCHLIST_EVENTS.has(e.event_name)),
-    promptEvents:    userEvents.filter((e) => PROMPT_EVENTS.has(e.event_name)),
-    engagementEvts:  userEvents.filter((e) => ENGAGEMENT_EVENTS.has(e.event_name)),
-    demoEvents:      userEvents.filter((e) => DEMO_EVENTS.has(e.event_name)),
-    paymentEvents:   userEvents.filter((e) => PAYMENT_EVENTS.has(e.event_name)),
-    totalEvents:     userEvents.length,
+  // ── 3. Compute data window (what dates our DB covers) ────────────────────
+  const { data: windowRows } = await db
+    .from("metrics_daily")
+    .select("date")
+    .order("date", { ascending: true });
+  const allDates   = (windowRows ?? []).map((r) => r.date as string);
+  const dataFrom   = allDates[0]    ?? "unknown";
+  const dataTo     = allDates[allDates.length - 1] ?? "unknown";
+
+  // ── 4. Build rich behavioural facts ──────────────────────────────────────
+  // Activity by date — which days was the user active and how many actions
+  const activityByDate: Record<string, number> = {};
+  for (const ev of userEvents) {
+    const d = ev.occurred_at.slice(0, 10);
+    activityByDate[d] = (activityByDate[d] ?? 0) + 1;
+  }
+  const activeDays = Object.keys(activityByDate).sort();
+
+  // Extension install — exact datetime
+  const installEvent = userEvents.find((e) => e.event_name === "extension_page_extension_installed");
+
+  // Feature usage counts
+  const featureCounts: Record<string, number> = {};
+  const FEATURE_LABELS: Record<string, string> = {
+    "extension_page_extension_installed":    "Installed browser extension",
+    "prompt_flow_completed":                  "Ran a prompt",
+    "prompt_loading_modal_shown":             "Started a prompt",
+    "viewed_watchlist_details_page":          "Viewed LinkedIn watchlist",
+    "viewed_reddit_watchlist_details_page":   "Viewed Reddit watchlist",
+    "viewed_lists_page":                      "Viewed lists page",
+    "watchlist_sidebar_clicked":              "Opened watchlist sidebar",
+    "filter_label_used":                      "Used label filter",
+    "filter_show_interactions_used":          "Used interactions filter",
+    "filter_posted_date_used":                "Used date filter",
+    "filter_people_used":                     "Used people filter",
+    "filter_post_type_used":                  "Used post type filter",
+    "payment_modal_modal_viewed":             "Opened pricing page",
+    "payment_modal_plan_viewed":              "Viewed a plan",
+    "payment_modal_payment_button_clicked":   "Clicked to pay",
+    "payment_modal_trial_button_clicked":     "Clicked to start trial",
+    "payment_modal_checkout_completed":       "Completed checkout",
+    "ai_onboarding_modal_billing_screen_shown": "Reached billing in onboarding",
+    "list_csv_exported":                      "Exported a CSV",
+    "list_emails_fetched":                    "Fetched emails from a list",
+    "create_list_modal_opened":               "Opened create list",
+    "user_registered":                        "Registered an account",
+    "user_logged_in":                         "Logged in",
   };
+  for (const ev of userEvents) {
+    if (FEATURE_LABELS[ev.event_name]) {
+      featureCounts[ev.event_name] = (featureCounts[ev.event_name] ?? 0) + 1;
+    }
+  }
 
-  // ── 3. Fetch backend plan data ────────────────────────────────────────────
+  // Session gaps — find the longest quiet period between active days
+  let longestGapDays = 0;
+  for (let i = 1; i < activeDays.length; i++) {
+    const gap = (new Date(activeDays[i]).getTime() - new Date(activeDays[i - 1]).getTime()) / 86_400_000;
+    if (gap > longestGapDays) longestGapDays = Math.round(gap);
+  }
+
+  // ── 5. Fetch backend plan data ────────────────────────────────────────────
   let planInfo: { status: string; detail: string } | null = null;
   let teamCreatedAt: string | null = null;
+  const userEmail = email ?? (snapshotRow?.email as string) ?? null;
 
-  if (email) {
-    const team = await fetchTeamByEmail(email);
+  if (userEmail) {
+    const team = await fetchTeamByEmail(userEmail);
     if (team) {
       teamCreatedAt = team.created_at as string;
       planInfo = detectPlanStatus(team as {
@@ -188,32 +247,46 @@ export async function POST(req: Request) {
     }
   }
 
-  // ── 4. Build context for Claude ───────────────────────────────────────────
+  // Plan from snapshot as fallback
+  const planFromSnapshot = snapshotRow?.plan_type as string | null;
+
+  // ── 6. Build factual context ──────────────────────────────────────────────
+  const featureLines = Object.entries(featureCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, c]) => `  • ${FEATURE_LABELS[k]}: ${c} time${c > 1 ? "s" : ""}`)
+    .join("\n");
+
+  const activityLine = activeDays.length > 0
+    ? activeDays.map((d) => `${d} (${activityByDate[d]} actions)`).join(", ")
+    : "No recorded activity";
+
   const context = `
-USER: ${name || "Unknown"} | Email: ${email || "Unknown"}
+DATA WINDOW: Our records cover ${dataFrom} to ${dataTo}. Everything below is based solely on activity within this period.
 
-ACCOUNT:
-- Signed up: ${teamCreatedAt ?? moments.accountCreated ?? "Unknown"}
-- Last seen: ${moments.lastSeen ?? "Unknown"}
-- Total events recorded: ${moments.totalEvents}
+USER: ${name || snapshotRow?.name || "Unknown"} | Email: ${userEmail ?? "Unknown"}
 
-PLAN STATUS:
-- ${planInfo ? `${planInfo.status} — ${planInfo.detail}` : "Unknown (no backend data)"}
+ACCOUNT FACTS:
+- Account created (OutX backend): ${teamCreatedAt ?? "Not available — data from Mixpanel only"}
+- First activity in our data: ${activeDays[0] ?? "None"}
+- Last activity in our data: ${activeDays[activeDays.length - 1] ?? "None"}
+- Total actions recorded in this window: ${userEvents.length}
+- Number of active days: ${activeDays.length}
+- Longest gap between active days: ${longestGapDays > 0 ? `${longestGapDays} days` : "N/A"}
 
-PRODUCT JOURNEY:
-- First login to dashboard: ${moments.firstLogin ?? "Not recorded"}
-- Plugin/extension invoked: ${moments.pluginInvoked.length > 0 ? `Yes — ${moments.pluginInvoked.length} times, last on ${moments.pluginInvoked[moments.pluginInvoked.length - 1].occurred_at}` : "No"}
-- Watchlist activity: ${moments.watchlistEvents.length > 0 ? `Yes — ${moments.watchlistEvents.length} events, first on ${moments.watchlistEvents[0].occurred_at}` : "No watchlist activity"}
-- Prompt flows: ${moments.promptEvents.length > 0 ? `Completed ${moments.promptEvents.length} prompt flows` : "No prompts run"}
-- Post engagement (filters, interactions): ${moments.engagementEvts.length > 0 ? `Yes — ${moments.engagementEvts.length} engagement events` : "No"}
-- Demo booked: ${moments.demoEvents.length > 0 ? "Yes" : "No"}
-- Reached payment screen: ${moments.paymentEvents.length > 0 ? `Yes — ${moments.paymentEvents.map((e) => e.event_name).join(", ")}` : "No"}
+CURRENT PLAN (as of today):
+- ${planInfo ? `${planInfo.status} — ${planInfo.detail}` : planFromSnapshot ? `${planFromSnapshot} (from activity data — no billing system access)` : "Not known"}
 
-RAW TIMELINE (last 30 events):
-${userEvents.slice(-30).map((e) => `- ${e.occurred_at.slice(0, 16)}: ${e.event_name}`).join("\n")}
+BROWSER EXTENSION:
+- Installed: ${installEvent ? `Yes — on ${installEvent.occurred_at.slice(0, 16)} UTC` : "Not recorded in this window"}
+
+FEATURES USED (all-time within data window):
+${featureLines || "  No tracked features used"}
+
+ACTIVE DAYS AND VOLUME:
+${activityLine}
 `.trim();
 
-  // ── 5. Ask Claude Haiku (via OpenRouter) to write the story ─────────────
+  // ── 7. Ask Claude to write the factual story ──────────────────────────────
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return Response.json({ error: "OPENROUTER_API_KEY not configured" }, { status: 500 });
 
@@ -230,21 +303,29 @@ ${userEvents.slice(-30).map((e) => `- ${e.occurred_at.slice(0, 16)}: ${e.event_n
       messages: [
         {
           role: "user",
-          content: `You are a detective telling the story of a user's journey through a product — think Sherlock Holmes piecing together clues. Based on the data below, narrate exactly what this person did, in plain everyday English that anyone can understand. No technical jargon, no event names, no product terminology. Just describe what they actually did as a human being: when they showed up, what they tried, where they got stuck, how long they stayed, and when they went quiet.
+          content: `You are Sherlock Holmes, and you have just examined the complete case file of a user's journey through a product. Tell the story of exactly what this person did — narrate it like you are presenting your findings to Watson. Vivid, engaging, chronological. Every clue is a specific fact from the data.
 
-Tell it in chronological order, like a short story. Be specific with dates ("on March 16th", "three days later") rather than vague ("recently"). Keep it to 3–5 short paragraphs. End with one sentence — your verdict — on what the team should do next and why.
+Start your narration with: "Based on the records available from [start date] to [end date]..." — this anchors everything that follows to the actual data window.
 
-Rules:
-- No bullet points. Flowing prose only.
-- No words like "funnel", "paywall", "DAU", "event", "modal", "onboarding flow". Say what the person actually experienced instead.
-- If they saw a pricing screen, say "they were shown the pricing page". If they installed the extension, say "they installed the browser plugin". Keep it human.
-- Write as if you're briefing a non-technical founder who wants to understand this specific person.
+Then walk through the story in 3–5 short paragraphs:
+- When they first appeared, what plan they were on, when they installed the browser extension (use the exact date and time if available).
+- Which features they actively used, how many times, and on which dates. Be specific: "seventeen times", "on March 12th", "across four separate days".
+- How their activity unfolded day by day — bursts of heavy use, quiet stretches, gaps. Let the rhythm tell itself through the facts.
+- Their last recorded activity: the exact date, total actions across the whole window, number of active days.
+
+Rules — these are absolute:
+- Flowing prose only. No bullet points.
+- Use specific numbers, dates, and plain English descriptions of features (e.g. "ran a prompt", "opened their LinkedIn watchlist", "installed the browser plugin", "viewed the pricing page").
+- Never use: "funnel", "paywall", "churn", "at risk", "event", "modal", "onboarding flow", or any technical term.
+- Do NOT predict what this person will do. Do NOT say what the team should do. Do NOT speculate about intent. Report only what the data shows happened.
+- If billing data is unavailable, say so in one plain sentence — do not guess at the plan.
+- End with a single factual closing sentence stating their last active date and total actions recorded. Nothing more.
 
 ${context}`,
         },
       ],
-      temperature: 0.7,
-      max_tokens: 600,
+      temperature: 0.4,
+      max_tokens: 700,
     }),
   });
 
@@ -256,5 +337,17 @@ ${context}`,
   const json = await res.json();
   const story = (json.choices?.[0]?.message?.content ?? "") as string;
 
-  return Response.json({ story, context_used: { moments, planInfo, teamCreatedAt } });
+  return Response.json({
+    story,
+    context_used: {
+      dataWindow: { from: dataFrom, to: dataTo },
+      activeDays,
+      activityByDate,
+      featureCounts,
+      installEvent,
+      planInfo,
+      teamCreatedAt,
+      totalEvents: userEvents.length,
+    },
+  });
 }
