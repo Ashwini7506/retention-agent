@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 // Reads funnel definitions from funnel_versions + funnel_blocks.
 // Auto-seeds the default OutX funnel on first run if nothing exists.
 
-const NEW_USER_VERSION_ID      = "a1b2c3d4-0000-0000-0000-000000000001";
-const RETURNING_VERSION_ID     = "a1b2c3d4-0000-0000-0000-000000000002";
+const NEW_USER_VERSION_ID      = "a1b2c3d4-0000-0000-0000-000000000003";
+const RETURNING_VERSION_ID     = "a1b2c3d4-0000-0000-0000-000000000004";
 
 const DEFAULT_NEW_BLOCKS = [
   // ONLY user_registered — other signup events (Register Button Clicked, otp_sent, etc.)
@@ -34,19 +34,28 @@ const DEFAULT_RETURNING_BLOCKS = [
 ];
 
 async function ensureFunnelSeeded(db: ReturnType<typeof supabaseAdmin>) {
-  // Always upsert versions + delete/re-insert blocks so changes to DEFAULT_*_BLOCKS
-  // take effect immediately without manual DB intervention.
-  await db.from("funnel_versions").upsert([
-    { id: NEW_USER_VERSION_ID,  name: "OutX Default Funnel",          is_active: true },
-    { id: RETURNING_VERSION_ID, name: "OutX Returning User Funnel",   is_active: true },
-  ]);
+  // Only seed once — check if versions exist before inserting.
+  // Bumping the version IDs above forces a fresh seed with updated block definitions.
+  const { data: existing } = await db
+    .from("funnel_versions")
+    .select("id")
+    .in("id", [NEW_USER_VERSION_ID, RETURNING_VERSION_ID]);
 
-  await db.from("funnel_blocks").delete().in("funnel_version_id", [NEW_USER_VERSION_ID, RETURNING_VERSION_ID]);
+  const existingIds = new Set((existing ?? []).map((v) => v.id));
 
-  await db.from("funnel_blocks").insert([
-    ...DEFAULT_NEW_BLOCKS.map((b)       => ({ ...b, funnel_version_id: NEW_USER_VERSION_ID })),
-    ...DEFAULT_RETURNING_BLOCKS.map((b) => ({ ...b, funnel_version_id: RETURNING_VERSION_ID })),
-  ]);
+  if (!existingIds.has(NEW_USER_VERSION_ID)) {
+    await db.from("funnel_versions").insert({ id: NEW_USER_VERSION_ID, name: "OutX Default Funnel", is_active: true });
+    await db.from("funnel_blocks").insert(
+      DEFAULT_NEW_BLOCKS.map((b) => ({ ...b, funnel_version_id: NEW_USER_VERSION_ID }))
+    );
+  }
+
+  if (!existingIds.has(RETURNING_VERSION_ID)) {
+    await db.from("funnel_versions").insert({ id: RETURNING_VERSION_ID, name: "OutX Returning User Funnel", is_active: true });
+    await db.from("funnel_blocks").insert(
+      DEFAULT_RETURNING_BLOCKS.map((b) => ({ ...b, funnel_version_id: RETURNING_VERSION_ID }))
+    );
+  }
 }
 
 export async function GET(request: Request) {
