@@ -82,8 +82,17 @@ export async function GET(request: Request) {
 
   // ── Load all raw events + users (with optional date filter) ───────────────
 
-  const from = fromDate ? `${fromDate}T00:00:00.000Z` : "2000-01-01T00:00:00.000Z";
-  const to   = toDate   ? `${toDate}T23:59:59.999Z`   : "2099-12-31T23:59:59.999Z";
+  // Dates from UI are IST (UTC+5:30). Convert to UTC so the DB filter is correct.
+  // IST midnight = UTC 18:30 previous day. IST 23:59 = UTC 18:29 same day.
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const fromUtc = fromDate
+    ? new Date(new Date(`${fromDate}T00:00:00.000Z`).getTime() - IST_OFFSET_MS).toISOString()
+    : "2000-01-01T00:00:00.000Z";
+  const toUtc = toDate
+    ? new Date(new Date(`${toDate}T23:59:59.999Z`).getTime() - IST_OFFSET_MS).toISOString()
+    : "2099-12-31T23:59:59.999Z";
+  const from = fromUtc;
+  const to   = toUtc;
 
   const [eventsRes, usersRes] = await Promise.all([
     db.from("raw_events")
