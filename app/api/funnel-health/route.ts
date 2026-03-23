@@ -82,16 +82,15 @@ export async function GET(request: Request) {
 
   // ── Load all raw events + users (with optional date filter) ───────────────
 
-  let eventsQuery = db
-    .from("raw_events")
-    .select("distinct_id, event_name, occurred_at, properties")
-    .limit(100000);
-
-  if (fromDate) eventsQuery = eventsQuery.gte("occurred_at", `${fromDate}T00:00:00`);
-  if (toDate)   eventsQuery = eventsQuery.lte("occurred_at", `${toDate}T23:59:59`);
+  const from = fromDate ? `${fromDate}T00:00:00.000Z` : "2000-01-01T00:00:00.000Z";
+  const to   = toDate   ? `${toDate}T23:59:59.999Z`   : "2099-12-31T23:59:59.999Z";
 
   const [eventsRes, usersRes] = await Promise.all([
-    eventsQuery,
+    db.from("raw_events")
+      .select("distinct_id, event_name, occurred_at, properties")
+      .gte("occurred_at", from)
+      .lte("occurred_at", to)
+      .limit(100000),
     db.from("users").select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source"),
   ]);
 
