@@ -1,6 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
-
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+import { OpenRouter } from "@openrouter/sdk";
 
 // POST /api/user-story
 // Body: { email: string, device_id: string, name: string }
@@ -217,36 +216,23 @@ ${userEvents.slice(-30).map((e) => `- ${e.occurred_at.slice(0, 16)}: ${e.event_n
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return Response.json({ error: "OPENROUTER_API_KEY not configured" }, { status: 500 });
 
-  const res = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://funnelmind.outx.ai",
-      "X-Title": "FunnelMind",
-    },
-    body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL ?? "anthropic/claude-haiku-4-5",
-      messages: [
-        {
-          role: "user",
-          content: `You are a retention analyst at OutX.AI. Based on this user's data, write a concise, human narrative (3-5 paragraphs) that tells the complete story of their journey — when they joined, what they did, how engaged they are, their plan status, and what the retention risk looks like. Write it like a story, not a bullet list. Be specific with dates and numbers. End with one clear recommendation for what the team should do.
+  const client = new OpenRouter({ apiKey });
+
+  const completion = await client.chat.send({
+    model: process.env.OPENROUTER_MODEL ?? "anthropic/claude-haiku-4.5",
+    messages: [
+      {
+        role: "user",
+        content: `You are a retention analyst at OutX.AI. Based on this user's data, write a concise, human narrative (3-5 paragraphs) that tells the complete story of their journey — when they joined, what they did, how engaged they are, their plan status, and what the retention risk looks like. Write it like a story, not a bullet list. Be specific with dates and numbers. End with one clear recommendation for what the team should do.
 
 ${context}`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 600,
-    }),
+      },
+    ],
+    temperature: 0.7,
+    max_tokens: 600,
   });
 
-  if (!res.ok) {
-    const err = await res.text();
-    return Response.json({ error: `OpenRouter error: ${err}` }, { status: 500 });
-  }
-
-  const json = await res.json();
-  const story = json.choices?.[0]?.message?.content ?? "";
+  const story = completion.choices?.[0]?.message?.content ?? "";
 
   return Response.json({ story, context_used: { moments, planInfo, teamCreatedAt } });
 }
