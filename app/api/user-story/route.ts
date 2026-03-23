@@ -286,7 +286,17 @@ ACTIVE DAYS AND VOLUME:
 ${activityLine}
 `.trim();
 
-  // ── 7. Ask Claude to write the factual story ──────────────────────────────
+  // ── 7. Check cache — if story was generated today, return it ────────────
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  if (
+    canonicalId &&
+    snapshotRow?.story &&
+    snapshotRow?.story_generated_date === todayUTC
+  ) {
+    return Response.json({ story: snapshotRow.story as string, cached: true });
+  }
+
+  // ── 8. Ask Claude to write the story ─────────────────────────────────────
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return Response.json({ error: "OPENROUTER_API_KEY not configured" }, { status: 500 });
 
@@ -303,29 +313,30 @@ ${activityLine}
       messages: [
         {
           role: "user",
-          content: `You are Sherlock Holmes, and you have just examined the complete case file of a user's journey through a product. Tell the story of exactly what this person did — narrate it like you are presenting your findings to Watson. Vivid, engaging, chronological. Every clue is a specific fact from the data.
+          content: `You are Sherlock Holmes reviewing a case file. Present your findings as short, punchy bullet points — one fact per line, no padding, no elaborate sentences. Think of it as reading notes off an index card.
 
-Start your narration with: "Based on the records available from [start date] to [end date]..." — this anchors everything that follows to the actual data window.
+Start with one line: "Data window: [start date] → [end date]"
 
-Then walk through the story in 3–5 short paragraphs:
-- When they first appeared, what plan they were on, when they installed the browser extension (use the exact date and time if available).
-- Which features they actively used, how many times, and on which dates. Be specific: "seventeen times", "on March 12th", "across four separate days".
-- How their activity unfolded day by day — bursts of heavy use, quiet stretches, gaps. Let the rhythm tell itself through the facts.
-- Their last recorded activity: the exact date, total actions across the whole window, number of active days.
+Then list the key facts, each as a short bullet. Cover:
+• When they first appeared and on what plan
+• Whether they installed the browser plugin — if yes, exact date and time
+• Each active day: date + number of actions + what they mainly did (e.g. "viewed LinkedIn watchlist 104×, logged in 3×")
+• Any notable features used — with counts
+• Last active date and total actions
 
-Rules — these are absolute:
-- Flowing prose only. No bullet points.
-- Use specific numbers, dates, and plain English descriptions of features (e.g. "ran a prompt", "opened their LinkedIn watchlist", "installed the browser plugin", "viewed the pricing page").
-- Never use: "funnel", "paywall", "churn", "at risk", "event", "modal", "onboarding flow", or any technical term.
-- Do NOT predict what this person will do. Do NOT say what the team should do. Do NOT speculate about intent. Report only what the data shows happened.
-- If billing data is unavailable, say so in one plain sentence — do not guess at the plan.
-- End with a single factual closing sentence stating their last active date and total actions recorded. Nothing more.
+Rules:
+- One bullet = one fact. Keep each bullet under 15 words.
+- Use numbers, not words: "104×" not "one hundred and four times"
+- Plain English only — no jargon, no technical terms, no event names
+- Do NOT say "churn", "at risk", "funnel", "paywall", "modal", or make any prediction
+- Do NOT add a conclusion or recommendation — just the facts
+- If data is missing (e.g. no billing info), say so in one bullet: "Plan: Expert (no billing records available)"
 
 ${context}`,
         },
       ],
-      temperature: 0.4,
-      max_tokens: 700,
+      temperature: 0.3,
+      max_tokens: 400,
     }),
   });
 
@@ -337,17 +348,13 @@ ${context}`,
   const json = await res.json();
   const story = (json.choices?.[0]?.message?.content ?? "") as string;
 
-  return Response.json({
-    story,
-    context_used: {
-      dataWindow: { from: dataFrom, to: dataTo },
-      activeDays,
-      activityByDate,
-      featureCounts,
-      installEvent,
-      planInfo,
-      teamCreatedAt,
-      totalEvents: userEvents.length,
-    },
-  });
+  // ── 9. Cache the story in user_snapshots ─────────────────────────────────
+  if (canonicalId && story) {
+    await db
+      .from("user_snapshots")
+      .update({ story, story_generated_date: todayUTC })
+      .eq("distinct_id", canonicalId);
+  }
+
+  return Response.json({ story, cached: false });
 }

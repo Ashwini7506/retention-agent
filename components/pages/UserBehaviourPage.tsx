@@ -353,13 +353,27 @@ function StoryView({ user }: { user: UserRow }) {
     );
   }
 
+  const lines = story.split("\n").map((l) => l.trim()).filter(Boolean);
+  const isBullet = (l: string) => l.startsWith("•") || l.startsWith("-") || l.startsWith("*");
+
   return (
-    <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4">
-      {story.split("\n\n").filter(Boolean).map((para, i) => (
-        <p key={i} className={`text-sm text-zinc-300 leading-relaxed ${i > 0 ? "mt-3" : ""}`}>
-          {para}
-        </p>
-      ))}
+    <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4 space-y-1.5">
+      {lines.map((line, i) => {
+        if (isBullet(line)) {
+          const text = line.replace(/^[•\-*]\s*/, "");
+          return (
+            <div key={i} className="flex items-start gap-2">
+              <span className="text-indigo-500 mt-1 shrink-0 text-xs">•</span>
+              <span className="text-sm text-zinc-300 leading-snug">{text}</span>
+            </div>
+          );
+        }
+        return (
+          <p key={i} className="text-xs text-zinc-500 font-medium uppercase tracking-wide pt-1">
+            {line}
+          </p>
+        );
+      })}
     </div>
   );
 }
