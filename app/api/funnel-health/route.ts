@@ -339,6 +339,13 @@ export async function GET(request: Request) {
       anonymous_count: allDeviceIds.filter((d) => !isIdentified(d) && !newSet.has(d)).length,
       total_devices:   allDeviceIds.length,
     },
+    _debug: {
+      total_events_loaded:    evs.length,
+      user_registered_count:  evs.filter((e) => e.event_name === "user_registered").length,
+      from_filter: from,
+      to_filter:   to,
+      step0_events: newBlocks[0]?.events ?? [],
+    },
   });
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 500 });
