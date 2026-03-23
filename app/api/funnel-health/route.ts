@@ -133,17 +133,28 @@ export async function GET(request: Request) {
 
     const newSnapshots = (newSnaps ?? []) as Snapshot[];
 
-    // ── Returning users: no registration event in our data (user_type = 'old')
-    // meaning they signed up before our data window, but were active within range
-    const { data: retSnaps, error: e2 } = await db
-      .from("user_snapshots")
-      .select("*")
-      .eq("user_type", "old")
-      .gte("last_seen", fromUTC)
-      .lte("last_seen", toUTC);
-    if (e2) return Response.json({ error: e2.message }, { status: 500 });
-
-    const retSnapshots = (retSnaps ?? []) as Snapshot[];
+    // ── Returning users: signed up before our data window, came back within range
+    // Must have an email (identified users only — excludes anonymous $device: sessions)
+    // Paginate to avoid the 1000-row Supabase cap
+    const retSnapshots: Snapshot[] = [];
+    const RET_PAGE = 1000;
+    let retOffset = 0;
+    while (true) {
+      const { data: page, error: e2 } = await db
+        .from("user_snapshots")
+        .select("*")
+        .eq("user_type", "old")
+        .not("email", "is", null)
+        .neq("email", "")
+        .gte("last_seen", fromUTC)
+        .lte("last_seen", toUTC)
+        .range(retOffset, retOffset + RET_PAGE - 1);
+      if (e2) return Response.json({ error: e2.message }, { status: 500 });
+      const batch = (page ?? []) as Snapshot[];
+      retSnapshots.push(...batch);
+      if (batch.length < RET_PAGE) break;
+      retOffset += RET_PAGE;
+    }
 
     // ── New user funnel (sequential) ──────────────────────────────────────────
     // Step 1: Signed Up (reached_signup)
