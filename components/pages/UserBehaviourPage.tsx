@@ -32,16 +32,6 @@ type Summary = {
   healthy_count:   number;
 };
 
-type JourneyDay = {
-  date:   string;
-  events: { time: string; name: string; category: string }[];
-};
-
-type JourneyData = {
-  device_id:    string;
-  days:         JourneyDay[];
-  total_events: number;
-};
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 
@@ -318,111 +308,65 @@ const CAT_BRANCH_COLORS: Record<string, { dot: string; label: string; line: stri
   Other:          { dot: "bg-zinc-600",    label: "text-zinc-500",    line: "border-zinc-800"      },
 };
 
-/* ─── Story builder ─────────────────────────────────────────────────────── */
+/* ─── AI Story View ──────────────────────────────────────────────────────── */
 
-function buildStory(user: UserRow, journey: JourneyData) {
-  const allEvents = journey.days.flatMap((day) =>
-    day.events.map((ev) => ({ date: day.date, name: ev.name }))
-  );
+function StoryView({ user }: { user: UserRow }) {
+  const [story, setStory]     = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState("");
 
-  const find = (test: (n: string) => boolean) => allEvents.find((e) => test(e.name));
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    fetch("/api/user-story", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email:     user.email !== "—" ? user.email : null,
+        device_id: user.device_id,
+        name:      user.name !== "—" ? user.name : null,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) throw new Error(d.error);
+        setStory(d.story ?? "");
+      })
+      .catch((e) => setError(String(e).replace("Error: ", "")))
+      .finally(() => setLoading(false));
+  }, [user.device_id]);
 
-  const regEv     = find((n) => n.includes("Registered") || n.includes("Register Button"));
-  const extEv     = find((n) => n.includes("Installed"));
-  const watchEv   = find((n) => n.includes("Watchlist") || n.includes("Prompt"));
-  const paywallEv = find((n) => n.includes("Payment") && n.includes("View"));
-  const paidEv    = find((n) => n.includes("Checkout Completed") || n.includes("Trial Button"));
-
-  const milestones: { date: string; text: string; color: string }[] = [];
-  if (regEv)     milestones.push({ date: regEv.date,     text: "Signed up",                        color: "bg-indigo-500" });
-  if (extEv)     milestones.push({ date: extEv.date,     text: "Installed Chrome extension",       color: "bg-blue-500"   });
-  if (watchEv)   milestones.push({ date: watchEv.date,   text: "Used watchlist / prompts",         color: "bg-violet-500" });
-  if (paywallEv) milestones.push({ date: paywallEv.date, text: "Reached paywall",                  color: "bg-amber-500"  });
-  if (paidEv)    milestones.push({
-    date: paidEv.date,
-    text: paidEv.name.includes("Trial") ? "Started free trial" : "Completed payment",
-    color: "bg-emerald-500",
-  });
-
-  milestones.sort((a, b) => a.date.localeCompare(b.date));
-
-  if (user.last_seen) {
-    milestones.push({
-      date: user.last_seen,
-      text: user.days_since_last === 0 ? "Active today" : `Last active — ${user.days_since_last}d ago`,
-      color: user.days_since_last >= 3 ? "bg-rose-500" : "bg-zinc-500",
-    });
+  if (loading) {
+    return (
+      <div className="flex items-center gap-3 py-6">
+        <div className="w-4 h-4 border-2 border-zinc-700 border-t-indigo-500 rounded-full animate-spin shrink-0" />
+        <span className="text-sm text-zinc-500">Analysing {user.name !== "—" ? user.name.split(" ")[0] : "user"}&apos;s journey…</span>
+      </div>
+    );
   }
 
-  const firstName  = user.name !== "—" ? user.name.split(" ")[0] : "This user";
-  const signupDate = regEv ? formatDate(regEv.date) : (user.first_seen ? formatDate(user.first_seen) : "an unknown date");
-  const activeDays = journey.days.length;
-
-  let narrative = `${firstName} first appeared on ${signupDate}`;
-  if (user.plan !== "—") narrative += ` on a ${user.plan} plan`;
-  narrative += `. Active across ${activeDays} day${activeDays !== 1 ? "s" : ""} with ${user.total_events} events total. `;
-
-  if (paidEv) {
-    narrative += `Completed the full funnel and converted${paidEv.name.includes("Trial") ? " to a free trial" : " to a paid plan"}.`;
-  } else if (paywallEv) {
-    narrative += `Reached the paywall on ${formatDate(paywallEv.date)} but did not convert.`;
-  } else if (watchEv) {
-    narrative += `Engaged with the product — used watchlists and prompts — but never reached the paywall.`;
-  } else if (extEv) {
-    narrative += `Installed the extension but never set up a watchlist or ran a prompt.`;
-  } else {
-    narrative += `Never installed the Chrome extension.`;
+  if (error) {
+    return (
+      <div className="bg-rose-950/30 border border-rose-900/40 rounded-xl p-4">
+        <p className="text-sm text-rose-400">{error}</p>
+      </div>
+    );
   }
 
-  if (user.days_since_last >= 5) {
-    narrative += ` Silent for ${user.days_since_last} days — strong churn signal.`;
-  } else if (user.days_since_last >= 3) {
-    narrative += ` Inactive for ${user.days_since_last} days.`;
-  } else if (user.days_since_last <= 1) {
-    narrative += ` Last seen very recently.`;
-  }
-
-  return { narrative, milestones };
-}
-
-function StoryView({ user, journey }: { user: UserRow; journey: JourneyData }) {
-  const { narrative, milestones } = buildStory(user, journey);
   return (
-    <>
-      <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4">
-        <p className="text-sm text-zinc-300 leading-relaxed">{narrative}</p>
-      </div>
-      <div>
-        <p className="text-[10px] text-zinc-600 uppercase tracking-widest mb-3">Key Moments</p>
-        <div className="space-y-3">
-          {milestones.map((m, i) => (
-            <div key={i} className="flex items-start gap-3">
-              <span className="text-[11px] text-zinc-600 tabular-nums shrink-0 w-14 pt-0.5">
-                {m.date ? formatDate(m.date) : "—"}
-              </span>
-              <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${m.color}`} />
-              <span className="text-sm text-zinc-300">{m.text}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
+    <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4">
+      {story.split("\n\n").filter(Boolean).map((para, i) => (
+        <p key={i} className={`text-sm text-zinc-300 leading-relaxed ${i > 0 ? "mt-3" : ""}`}>
+          {para}
+        </p>
+      ))}
+    </div>
   );
 }
 
 /* ─── Journey Modal ──────────────────────────────────────────────────────── */
 
 function JourneyModal({ user, onClose }: { user: UserRow; onClose: () => void }) {
-  const [journey, setJourney] = useState<JourneyData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const ids = (user.distinct_ids ?? []).join(",");
-    fetch(`/api/user-journey?device_id=${encodeURIComponent(user.device_id)}&distinct_ids=${encodeURIComponent(ids)}`)
-      .then((r) => r.json())
-      .then((d) => { setJourney(Array.isArray(d?.days) ? d : null); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [user.device_id]);
 
   // Funnel stages for the mini progress strip
   const STAGES = ["Signed Up", "Got Into App", "AI Onboarding", "Watchlist / Prompts", "Payment"];
@@ -505,22 +449,8 @@ function JourneyModal({ user, onClose }: { user: UserRow; onClose: () => void })
         </div>
 
         {/* Story */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-5 h-5 border-2 border-zinc-700 border-t-indigo-500 rounded-full animate-spin" />
-            </div>
-          )}
-
-          {!loading && (!journey || journey.days.length === 0) && (
-            <div className="flex items-center justify-center py-12">
-              <p className="text-zinc-600 text-sm">No events found for this user.</p>
-            </div>
-          )}
-
-          {!loading && journey && journey.days.length > 0 && (
-            <StoryView user={user} journey={journey} />
-          )}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <StoryView user={user} />
         </div>
       </div>
     </div>
