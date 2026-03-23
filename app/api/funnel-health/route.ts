@@ -121,21 +121,24 @@ export async function GET(request: Request) {
       ? new Date(new Date(`${toDate}T23:59:59.999Z`).getTime() - IST_OFFSET_MS).toISOString().slice(0, 10)
       : "2099-12-31";
 
-    // ── New users: signed up within the selected date range ───────────────────
+    // ── New users: have a registration event (user_type = 'new') ─────────────
+    // and their signup fell within the selected date range
     const { data: newSnaps, error: e1 } = await db
       .from("user_snapshots")
       .select("*")
+      .eq("user_type", "new")
       .gte("signup_date", fromUTC)
       .lte("signup_date", toUTC);
     if (e1) return Response.json({ error: e1.message }, { status: 500 });
 
     const newSnapshots = (newSnaps ?? []) as Snapshot[];
 
-    // ── Returning users: signed up before the range but active within it ──────
+    // ── Returning users: no registration event in our data (user_type = 'old')
+    // meaning they signed up before our data window, but were active within range
     const { data: retSnaps, error: e2 } = await db
       .from("user_snapshots")
       .select("*")
-      .lt("signup_date", fromUTC)
+      .eq("user_type", "old")
       .gte("last_seen", fromUTC)
       .lte("last_seen", toUTC);
     if (e2) return Response.json({ error: e2.message }, { status: 500 });
