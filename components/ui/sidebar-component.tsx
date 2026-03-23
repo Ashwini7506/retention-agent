@@ -12,6 +12,7 @@ import {
   TestTool as Experiment,
   FunnelSort as FunnelChart,
   UserActivity,
+  Information,
 } from "@carbon/icons-react";
 
 /* ─── Logo ─────────────────────────────────────────────────────────────── */
@@ -80,6 +81,7 @@ const RETENTION_NAV: NavItemT[] = [
   { href: "/experiments", icon: <Experiment size={16} />,   label: "Experiments"     },
   { href: "/metrics",     icon: <Analytics size={16} />,    label: "Metrics"         },
   { href: "/users",       icon: <UserActivity size={16} />, label: "User Behaviour"  },
+  { href: "/pipeline",    icon: <Information size={16} />,  label: "How it Works"    },
 ];
 
 /* ─── Left agent rail ───────────────────────────────────────────────────── */

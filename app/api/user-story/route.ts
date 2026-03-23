@@ -249,6 +249,9 @@ export async function POST(req: Request) {
 
   // Plan from snapshot as fallback
   const planFromSnapshot = snapshotRow?.plan_type as string | null;
+  const churnScore    = snapshotRow?.churn_score    as number | null;
+  const riskLevel     = snapshotRow?.risk_level     as string | null;
+  const daysSinceLast = snapshotRow?.days_since_last as number | null;
 
   // ── 6. Build factual context ──────────────────────────────────────────────
   const featureLines = Object.entries(featureCounts)
@@ -275,6 +278,11 @@ ACCOUNT FACTS:
 
 CURRENT PLAN (as of today):
 - ${planInfo ? `${planInfo.status} — ${planInfo.detail}` : planFromSnapshot ? `${planFromSnapshot} (from activity data — no billing system access)` : "Not known"}
+
+RISK ASSESSMENT (pre-computed):
+- Churn score: ${churnScore != null ? `${churnScore}/100` : "Not computed"}
+- Risk level: ${riskLevel ?? "Unknown"}
+- Days since last activity: ${daysSinceLast != null ? `${daysSinceLast} days` : "Unknown"}
 
 BROWSER EXTENSION:
 - Installed: ${installEvent ? `Yes — on ${installEvent.occurred_at.slice(0, 16)} UTC` : "Not recorded in this window"}
@@ -313,20 +321,20 @@ ${activityLine}
       messages: [
         {
           role: "user",
-          content: `You are a sharp analyst writing a brief case note on a user. Write in a mix of short paragraphs and bullet points — not all bullets, not all prose. Think: 1-2 sentence paragraph to set the scene, then tight bullets for the details, then a closing sentence.
+          content: `You are a sharp analyst writing a brief case note on a user. Write in a mix of short paragraphs and bullet points — not all bullets, not all prose.
 
 Structure:
 1. One short paragraph (2 sentences max): who they are, what plan they're on, when they first appeared. If they installed the browser plugin, include the exact date and time here.
 2. Bullet points — one per active day: date, total actions, and what they mainly did (e.g. "Viewed LinkedIn watchlist 30×, ran 3 prompts, logged in twice")
-3. One short paragraph (1-2 sentences): summary of their overall activity — what they used most, last seen, total actions. No predictions, no verdict.
+3. One short paragraph (1-2 sentences): summary of their overall activity — what they used most, last seen, total actions.
+4. ONE final sentence starting with "Risk:" — state their risk level and the specific reasons why based on the data (e.g. "Risk: Critical — inactive for 13 days and never reached the paywall." or "Risk: At risk — only 8 total events across 2 days, never installed the extension."). Use the churn score and risk level from the RISK ASSESSMENT section.
 
 Rules:
 - Use numbers, not words: "104×" not "one hundred and four times"
-- Plain English only — no jargon, no technical event names
-- Do NOT say "churn", "at risk", "funnel", "paywall", or make any prediction
-- Do NOT add recommendations — just the facts
-- If plan or billing data is missing, say so plainly in the opening paragraph
-- Keep the whole thing under 180 words
+- Plain English only — no technical event names
+- Do NOT say "funnel", "paywall", "modal" — use plain equivalents ("pricing page", "payment screen", "popup")
+- The Risk sentence must be specific — name the actual reason(s), not just the label
+- Keep the whole thing under 200 words
 
 ${context}`,
         },
