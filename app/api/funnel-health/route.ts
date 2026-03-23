@@ -58,6 +58,7 @@ async function ensureFunnelSeeded(db: ReturnType<typeof supabaseAdmin>) {
   }
 }
 
+
 export async function GET(request: Request) {
   try {
     const db = supabaseAdmin();
@@ -77,29 +78,40 @@ export async function GET(request: Request) {
   // Dates from UI are IST (UTC+5:30). Convert to UTC so the DB filter is correct.
   // IST midnight = UTC 18:30 previous day. IST 23:59 = UTC 18:29 same day.
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const fromUtc = fromDate
+  const from = fromDate
     ? new Date(new Date(`${fromDate}T00:00:00.000Z`).getTime() - IST_OFFSET_MS).toISOString()
     : "2000-01-01T00:00:00.000Z";
-  const toUtc = toDate
+  const to = toDate
     ? new Date(new Date(`${toDate}T23:59:59.999Z`).getTime() - IST_OFFSET_MS).toISOString()
     : "2099-12-31T23:59:59.999Z";
-  const from = fromUtc;
-  const to   = toUtc;
 
-  const [eventsRes, usersRes] = await Promise.all([
-    db.from("raw_events")
-      .select("distinct_id, event_name, occurred_at, properties")
-      .gte("occurred_at", from)
-      .lte("occurred_at", to)
-      .limit(100000),
-    db.from("users").select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source"),
-  ]);
-
-  if (eventsRes.error) {
-    return Response.json({ error: eventsRes.error.message }, { status: 500 });
+  // ── Paginated fetch ───────────────────────────────────────────────────────
+  // PostgREST enforces a server-side max_rows=1000 cap that .limit() cannot override.
+  // We paginate in 1000-row pages until all events in the date range are loaded.
+  type RawEvent = { distinct_id: string; event_name: string; occurred_at: string; properties: unknown; insert_id: string };
+  const evs: RawEvent[] = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("raw_events")
+        .select("distinct_id, event_name, occurred_at, properties, insert_id")
+        .gte("occurred_at", from)
+        .lte("occurred_at", to)
+        .range(offset, offset + PAGE - 1);
+      if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!data || data.length === 0) break;
+      evs.push(...(data as RawEvent[]));
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
   }
 
-  const evs = eventsRes.data ?? [];
+  const { data: usersData } = await db
+    .from("users")
+    .select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source")
+    .range(0, 9999);
 
   // ── Build user profile lookup ─────────────────────────────────────────────
 
@@ -107,7 +119,7 @@ export async function GET(request: Request) {
     name: string; email: string; city: string; country: string;
     utm_source: string; plan_type: string; acquisition_source: string;
   }> = {};
-  for (const u of (usersRes.data ?? [])) {
+  for (const u of (usersData ?? [])) {
     usersByDistinctId[u.distinct_id] = {
       name:               u.name               ?? "",
       email:              u.email              ?? "",
@@ -328,9 +340,9 @@ export async function GET(request: Request) {
     };
   };
 
-  // Debug: trace user_registered events to diagnose why count may be wrong
   const regEvs = evs.filter((e) => e.event_name === "user_registered");
   const regDistinctIds = [...new Set(regEvs.map((e) => e.distinct_id))];
+  const regInsertIds   = [...new Set(regEvs.map((e) => e.insert_id).filter(Boolean))];
 
   return Response.json({
     funnel_name:   "OutX Default Funnel",
@@ -345,11 +357,12 @@ export async function GET(request: Request) {
       total_devices:   allDeviceIds.length,
     },
     _debug: {
-      total_events_loaded:          evs.length,
-      user_registered_count:        regEvs.length,
-      user_registered_unique_ids:   regDistinctIds.length,
-      user_registered_distinct_ids: regDistinctIds,
-      new_devices_count:            newDevices.length,
+      total_events_loaded:           evs.length,
+      user_registered_count:         regEvs.length,
+      user_registered_unique_ids:    regDistinctIds.length,
+      user_registered_unique_inserts: regInsertIds.length,
+      user_registered_distinct_ids:  regDistinctIds,
+      new_devices_count:             newDevices.length,
       from_filter: from,
       to_filter:   to,
     },
