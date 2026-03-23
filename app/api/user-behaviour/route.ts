@@ -71,20 +71,44 @@ const makePlan = (raw: string): string => {
 export async function GET() {
   const db = supabaseAdmin();
 
-  const [eventsRes, usersRes] = await Promise.all([
-    db.from("raw_events").select("distinct_id, event_name, occurred_at, properties").limit(100000),
-    db.from("users").select("distinct_id, name, email, plan_type, acquisition_source"),
-  ]);
-
-  if (eventsRes.error) {
-    return Response.json({ error: eventsRes.error.message }, { status: 500 });
+  // Paginate events — PostgREST 1000-row server cap blocks .limit()
+  const evs: Array<{ distinct_id: string; event_name: string; occurred_at: string; properties: unknown }> = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("raw_events")
+        .select("distinct_id, event_name, occurred_at, properties")
+        .range(offset, offset + PAGE - 1);
+      if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!data || data.length === 0) break;
+      evs.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
   }
 
-  const evs = eventsRes.data ?? [];
+  // Paginate users
+  const usersAll: Array<{ distinct_id: string; name: string; email: string; plan_type: string; acquisition_source: string }> = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("users")
+        .select("distinct_id, name, email, plan_type, acquisition_source")
+        .range(offset, offset + PAGE - 1);
+      if (error || !data || data.length === 0) break;
+      usersAll.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
 
   // Build user profile lookup
   const userProfile: Record<string, { name: string; email: string; plan_type: string }> = {};
-  for (const u of usersRes.data ?? []) {
+  for (const u of usersAll) {
     userProfile[u.distinct_id] = {
       name:      u.name      ?? "",
       email:     u.email     ?? "",
