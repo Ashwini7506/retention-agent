@@ -345,18 +345,24 @@ export default function FunnelHealthPage() {
   const [loading, setLoading]         = useState(true);
   const [tab, setTab]                 = useState<Tab>('new_users');
   const [hoveredStep, setHoveredStep] = useState<number | null>(null);
+  const [fromDate, setFromDate]       = useState('2026-03-21');
+  const [toDate, setToDate]           = useState('2026-03-22');
 
-  useEffect(() => {
-    fetch('/api/funnel-health')
+  const fetchData = (from: string, to: string) => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to)   params.set('to', to);
+    fetch(`/api/funnel-health?${params}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d?.new_users && d?.old_users && d?.summary) {
-          setData(d);
-        }
+        if (d?.new_users && d?.old_users && d?.summary) setData(d);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { fetchData(fromDate, toDate); }, []);
 
   const switchTab = (t: Tab) => { setTab(t); setHoveredStep(null); };
 
@@ -392,13 +398,40 @@ export default function FunnelHealthPage() {
           <p className="text-xs text-zinc-500 mt-0.5">
             OutX.AI · user journey ·{' '}
             {tab === 'new_users'
-              ? `${data?.summary?.new_user_count ?? 0} new users today`
-              : `${data?.summary?.old_user_count ?? 0} returning users today`}
+              ? `${data?.summary?.new_user_count ?? 0} new users`
+              : `${data?.summary?.old_user_count ?? 0} returning users`}
+            {fromDate && toDate ? ` · ${fromDate} → ${toDate}` : ''}
           </p>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-xl p-1">
+        {/* Date filter */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2">
+            <span className="text-zinc-500 text-xs">From</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="bg-transparent text-xs text-zinc-200 outline-none [color-scheme:dark]"
+            />
+            <span className="text-zinc-600">→</span>
+            <span className="text-zinc-500 text-xs">To</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="bg-transparent text-xs text-zinc-200 outline-none [color-scheme:dark]"
+            />
+            <button
+              onClick={() => fetchData(fromDate, toDate)}
+              className="ml-1 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
+            >
+              Apply
+            </button>
+          </div>
+
+          {/* Tab switcher */}
+          <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-xl p-1">
           {([
             { id: 'new_users' as Tab, label: 'New Users',      sub: 'Signed up today' },
             { id: 'old_users' as Tab, label: 'Old Users',      sub: 'Returning today'  },
@@ -415,6 +448,7 @@ export default function FunnelHealthPage() {
               <span className="text-[10px] opacity-70">{t.sub}</span>
             </button>
           ))}
+          </div>
         </div>
       </div>
 

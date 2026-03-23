@@ -49,11 +49,16 @@ async function ensureFunnelSeeded(db: ReturnType<typeof supabaseAdmin>) {
   ]);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const db = supabaseAdmin();
 
   await ensureFunnelSeeded(db);
+
+  // ── Date filter from query params (?from=2026-03-21&to=2026-03-22) ─────────
+  const { searchParams } = new URL(request.url);
+  const fromDate = searchParams.get("from"); // "YYYY-MM-DD" or null
+  const toDate   = searchParams.get("to");   // "YYYY-MM-DD" or null
 
   // ── Load both funnel definitions ──────────────────────────────────────────
 
@@ -66,10 +71,18 @@ export async function GET() {
   const newBlocks       = (allBlocks ?? []).filter((b) => b.funnel_version_id === NEW_USER_VERSION_ID);
   const returningBlocks = (allBlocks ?? []).filter((b) => b.funnel_version_id === RETURNING_VERSION_ID);
 
-  // ── Load all raw events + users ───────────────────────────────────────────
+  // ── Load all raw events + users (with optional date filter) ───────────────
+
+  let eventsQuery = db
+    .from("raw_events")
+    .select("distinct_id, event_name, occurred_at, properties")
+    .limit(100000);
+
+  if (fromDate) eventsQuery = eventsQuery.gte("occurred_at", `${fromDate}T00:00:00`);
+  if (toDate)   eventsQuery = eventsQuery.lte("occurred_at", `${toDate}T23:59:59`);
 
   const [eventsRes, usersRes] = await Promise.all([
-    db.from("raw_events").select("distinct_id, event_name, occurred_at, properties").limit(100000),
+    eventsQuery,
     db.from("users").select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source"),
   ]);
 
