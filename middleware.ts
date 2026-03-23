@@ -1,11 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC = ["/", "/login", "/api/auth/login"];
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (PUBLIC.some((p) => pathname.startsWith(p)) || pathname.startsWith("/_next")) {
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/_next")
+  ) {
     return NextResponse.next();
   }
 
