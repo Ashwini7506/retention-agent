@@ -34,14 +34,23 @@ const PAYMENT_SET      = new Set(PAYMENT);
 export async function GET() {
   const db = supabaseAdmin();
 
-  const { data: rawEvs, error } = await db
-    .from("raw_events")
-    .select("distinct_id, event_name, occurred_at, properties")
-    .limit(100000);
-
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-
-  const evs = rawEvs ?? [];
+  // Paginate — PostgREST 1000-row server cap ignores .limit()
+  const evs: Array<{ distinct_id: string; event_name: string; occurred_at: string; properties: unknown }> = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("raw_events")
+        .select("distinct_id, event_name, occurred_at, properties")
+        .range(offset, offset + PAGE - 1);
+      if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!data || data.length === 0) break;
+      evs.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
 
   // ── Parse: resolve device_id from properties["Device ID"] ────────────────
 

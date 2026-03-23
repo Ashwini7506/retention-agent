@@ -50,17 +50,25 @@ export async function GET() {
   const dayStart = `${latestDate}T00:00:00`;
   const dayEnd = `${latestDate}T23:59:59`;
 
-  const { data: events, error } = await db
-    .from("raw_events")
-    .select("distinct_id, event_name, occurred_at, event_category, properties")
-    .gte("occurred_at", dayStart)
-    .lte("occurred_at", dayEnd);
-
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+  // Paginate — PostgREST 1000-row cap blocks single queries
+  const rawEvs: Array<{ distinct_id: string; event_name: string; occurred_at: string; event_category: string; properties: unknown }> = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("raw_events")
+        .select("distinct_id, event_name, occurred_at, event_category, properties")
+        .gte("occurred_at", dayStart)
+        .lte("occurred_at", dayEnd)
+        .range(offset, offset + PAGE - 1);
+      if (error) return Response.json({ error: error.message }, { status: 500 });
+      if (!data || data.length === 0) break;
+      rawEvs.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
   }
-
-  const rawEvs = events ?? [];
 
   // Resolve device_id: identified users group by distinct_id, anonymous by Device ID
   const evs = rawEvs.map((e) => {
