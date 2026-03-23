@@ -328,6 +328,10 @@ export async function GET(request: Request) {
     };
   };
 
+  // Debug: trace user_registered events to diagnose why count may be wrong
+  const regEvs = evs.filter((e) => e.event_name === "user_registered");
+  const regDistinctIds = [...new Set(regEvs.map((e) => e.distinct_id))];
+
   return Response.json({
     funnel_name:   "OutX Default Funnel",
     new_users:     newUserFunnel,
@@ -341,11 +345,13 @@ export async function GET(request: Request) {
       total_devices:   allDeviceIds.length,
     },
     _debug: {
-      total_events_loaded:    evs.length,
-      user_registered_count:  evs.filter((e) => e.event_name === "user_registered").length,
+      total_events_loaded:          evs.length,
+      user_registered_count:        regEvs.length,
+      user_registered_unique_ids:   regDistinctIds.length,
+      user_registered_distinct_ids: regDistinctIds,
+      new_devices_count:            newDevices.length,
       from_filter: from,
       to_filter:   to,
-      step0_events: newBlocks[0]?.events ?? [],
     },
   });
   } catch (err) {
