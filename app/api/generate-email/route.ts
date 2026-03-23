@@ -123,7 +123,7 @@ Write a subject line and email body. Return JSON only: { "subject": "...", "body
         "X-Title": "FunnelMind",
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL ?? "anthropic/claude-sonnet-4-5",
+        model: process.env.OPENROUTER_MODEL ?? "anthropic/claude-haiku-4-5",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user",   content: userPrompt },
