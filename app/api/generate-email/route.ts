@@ -1,10 +1,11 @@
 import { supabaseAdmin } from "@/lib/supabase";
-import { OpenRouter } from "@openrouter/sdk";
 
 // POST /api/generate-email
 // Body: { user: UserRow }
 // Fetches the user's events, builds context, calls OpenRouter to generate
 // a personalised re-engagement email. Returns { subject, body }.
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 const FUNNEL_LABELS: Record<string, string> = {
   "Signed Up":           "signed up but never opened the product",
@@ -113,19 +114,32 @@ Key actions they took: ${insights.keyActions.length ? insights.keyActions.join("
 Write a subject line and email body. Return JSON only: { "subject": "...", "body": "..." }`;
 
   try {
-    const client = new OpenRouter({ apiKey });
-
-    const completion = await client.chat.send({
-      model: process.env.OPENROUTER_MODEL ?? "anthropic/claude-haiku-4.5",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user",   content: userPrompt },
-      ],
-      temperature: 0.7,
-      max_tokens: 600,
+    const res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://funnelmind.outx.ai",
+        "X-Title": "FunnelMind",
+      },
+      body: JSON.stringify({
+        model: process.env.OPENROUTER_MODEL ?? "anthropic/claude-haiku-4.5",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user",   content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 600,
+      }),
     });
 
-    const raw = completion.choices?.[0]?.message?.content ?? "";
+    if (!res.ok) {
+      const err = await res.text();
+      return Response.json({ error: `OpenRouter error: ${err}` }, { status: 500 });
+    }
+
+    const json = await res.json();
+    const raw = (json.choices?.[0]?.message?.content ?? "") as string;
 
     // Parse the JSON from the model response
     const match = raw.match(/\{[\s\S]*\}/);
