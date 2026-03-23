@@ -230,7 +230,15 @@ ${userEvents.slice(-30).map((e) => `- ${e.occurred_at.slice(0, 16)}: ${e.event_n
       messages: [
         {
           role: "user",
-          content: `You are a retention analyst at OutX.AI. Based on this user's data, write a concise, human narrative (3-5 paragraphs) that tells the complete story of their journey — when they joined, what they did, how engaged they are, their plan status, and what the retention risk looks like. Write it like a story, not a bullet list. Be specific with dates and numbers. End with one clear recommendation for what the team should do.
+          content: `You are a detective telling the story of a user's journey through a product — think Sherlock Holmes piecing together clues. Based on the data below, narrate exactly what this person did, in plain everyday English that anyone can understand. No technical jargon, no event names, no product terminology. Just describe what they actually did as a human being: when they showed up, what they tried, where they got stuck, how long they stayed, and when they went quiet.
+
+Tell it in chronological order, like a short story. Be specific with dates ("on March 16th", "three days later") rather than vague ("recently"). Keep it to 3–5 short paragraphs. End with one sentence — your verdict — on what the team should do next and why.
+
+Rules:
+- No bullet points. Flowing prose only.
+- No words like "funnel", "paywall", "DAU", "event", "modal", "onboarding flow". Say what the person actually experienced instead.
+- If they saw a pricing screen, say "they were shown the pricing page". If they installed the extension, say "they installed the browser plugin". Keep it human.
+- Write as if you're briefing a non-technical founder who wants to understand this specific person.
 
 ${context}`,
         },
