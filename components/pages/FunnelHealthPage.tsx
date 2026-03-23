@@ -340,15 +340,40 @@ function FeatureBreakdown({ steps }: { steps: FunnelStep[] }) {
 
 type Tab = 'new_users' | 'old_users';
 
+const CACHE_KEY = 'funnelHealth_cache';
+
+function saveCache(from: string, to: string, data: FunnelData) {
+  try {
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ from, to, data }));
+  } catch {}
+}
+
+function loadCache(from: string, to: string): FunnelData | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const cached = JSON.parse(raw);
+    if (cached.from === from && cached.to === to) return cached.data;
+  } catch {}
+  return null;
+}
+
 export default function FunnelHealthPage() {
   const [data, setData]               = useState<FunnelData | null>(null);
   const [loading, setLoading]         = useState(true);
   const [tab, setTab]                 = useState<Tab>('new_users');
   const [hoveredStep, setHoveredStep] = useState<number | null>(null);
-  const [fromDate, setFromDate]       = useState('2026-03-21');
+  const [fromDate, setFromDate]       = useState('2026-03-15');
   const [toDate, setToDate]           = useState('2026-03-22');
 
   const fetchData = (from: string, to: string) => {
+    // Check cache first — avoids re-fetching when switching nav tabs
+    const cached = loadCache(from, to);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const params = new URLSearchParams();
     if (from) params.set('from', from);
@@ -356,7 +381,10 @@ export default function FunnelHealthPage() {
     fetch(`/api/funnel-health?${params}`)
       .then((r) => r.json())
       .then((d) => {
-        if (d?.new_users && d?.old_users && d?.summary) setData(d);
+        if (d?.new_users && d?.old_users && d?.summary) {
+          setData(d);
+          saveCache(from, to, d);
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -423,7 +451,10 @@ export default function FunnelHealthPage() {
               className="bg-transparent text-xs text-zinc-200 outline-none [color-scheme:dark]"
             />
             <button
-              onClick={() => fetchData(fromDate, toDate)}
+              onClick={() => {
+                try { sessionStorage.removeItem(CACHE_KEY); } catch {}
+                fetchData(fromDate, toDate);
+              }}
               className="ml-1 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors"
             >
               Apply
