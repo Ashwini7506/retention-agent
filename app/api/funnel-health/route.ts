@@ -62,23 +62,15 @@ export async function GET(request: Request) {
   try {
     const db = supabaseAdmin();
 
-  await ensureFunnelSeeded(db);
-
   // ── Date filter from query params (?from=2026-03-21&to=2026-03-22) ─────────
   const { searchParams } = new URL(request.url);
-  const fromDate = searchParams.get("from"); // "YYYY-MM-DD" or null
-  const toDate   = searchParams.get("to");   // "YYYY-MM-DD" or null
+  const fromDate = searchParams.get("from");
+  const toDate   = searchParams.get("to");
 
-  // ── Load both funnel definitions ──────────────────────────────────────────
-
-  const { data: allBlocks } = await db
-    .from("funnel_blocks")
-    .select("id, funnel_version_id, name, step_order, events")
-    .in("funnel_version_id", [NEW_USER_VERSION_ID, RETURNING_VERSION_ID])
-    .order("step_order", { ascending: true });
-
-  const newBlocks       = (allBlocks ?? []).filter((b) => b.funnel_version_id === NEW_USER_VERSION_ID);
-  const returningBlocks = (allBlocks ?? []).filter((b) => b.funnel_version_id === RETURNING_VERSION_ID);
+  // ── Use hardcoded funnel definitions — no DB lookup needed ────────────────
+  // Bypasses DB seeding issues on Vercel. Funnel blocks are defined here.
+  const newBlocks       = DEFAULT_NEW_BLOCKS.map((b, i) => ({ ...b, id: `new-${i}`, funnel_version_id: NEW_USER_VERSION_ID }));
+  const returningBlocks = DEFAULT_RETURNING_BLOCKS.map((b, i) => ({ ...b, id: `ret-${i}`, funnel_version_id: RETURNING_VERSION_ID }));
 
   // ── Load all raw events + users (with optional date filter) ───────────────
 
