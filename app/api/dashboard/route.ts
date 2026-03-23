@@ -36,7 +36,8 @@ export async function GET() {
 
   const { data: rawEvs, error } = await db
     .from("raw_events")
-    .select("distinct_id, event_name, occurred_at, properties");
+    .select("distinct_id, event_name, occurred_at, properties")
+    .limit(100000);
 
   if (error) return Response.json({ error: error.message }, { status: 500 });
 

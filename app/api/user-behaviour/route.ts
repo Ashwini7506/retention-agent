@@ -72,7 +72,7 @@ export async function GET() {
   const db = supabaseAdmin();
 
   const [eventsRes, usersRes] = await Promise.all([
-    db.from("raw_events").select("distinct_id, event_name, occurred_at, properties"),
+    db.from("raw_events").select("distinct_id, event_name, occurred_at, properties").limit(100000),
     db.from("users").select("distinct_id, name, email, plan_type, acquisition_source"),
   ]);
 

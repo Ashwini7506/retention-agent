@@ -122,7 +122,8 @@ export async function GET() {
     const { data: allPrompts } = await db
       .from("raw_events")
       .select("properties")
-      .eq("event_name", "prompt_flow_completed");
+      .eq("event_name", "prompt_flow_completed")
+      .limit(100000);
     for (const e of allPrompts ?? []) {
       const props = typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties;
       if (props?.duration_seconds) promptDurations.push(Number(props.duration_seconds));

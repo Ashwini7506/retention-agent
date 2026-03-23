@@ -1,5 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/funnel-health
 // Reads funnel definitions from funnel_versions + funnel_blocks.
 // Auto-seeds the default OutX funnel on first run if nothing exists.
@@ -8,8 +10,15 @@ const NEW_USER_VERSION_ID      = "a1b2c3d4-0000-0000-0000-000000000001";
 const RETURNING_VERSION_ID     = "a1b2c3d4-0000-0000-0000-000000000002";
 
 const DEFAULT_NEW_BLOCKS = [
-  { step_order: 1, name: "Signed Up",             events: ["user_registered","Register Button Clicked","google_signup_button_clicked_register_page","submit_button_clicked_register_page","register_page_otp_sent"] },
+  // ONLY user_registered — other signup events (Register Button Clicked, otp_sent, etc.)
+  // are pre-registration actions that fire under anonymous IDs and inflate the count.
+  // Backend DB confirms ~32 real signups; Mixpanel fires user_registered for ~9.
+  // This gives the truest funnel from Mixpanel data until instrumentation is fixed.
+  { step_order: 1, name: "Signed Up",             events: ["user_registered"] },
+  // Extension install is tracked in OutX backend only — Mixpanel has ~4 events.
+  // Shown as independent metric, NOT required for downstream steps.
   { step_order: 2, name: "Installed Extension",   events: ["extension_page_extension_installed"] },
+  // Watchlist/Prompt is a WEB feature — no extension required. 29/32 users reach this.
   { step_order: 3, name: "Used Watchlist / Prompt", events: ["prompt_flow_completed","prompt_loading_modal_shown","viewed_watchlist_details_page","viewed_reddit_watchlist_details_page","viewed_lists_page","watchlist_sidebar_clicked","filter_label_used","filter_show_interactions_used","filter_posted_date_used"] },
   { step_order: 4, name: "Reached Paywall",       events: ["payment_modal_modal_viewed","payment_modal_plan_viewed","payment_modal_payment_button_clicked","payment_modal_trial_button_clicked","payment_modal_checkout_completed","ai_onboarding_modal_billing_screen_shown","post_onboarding_modal_billing_screen_shown"] },
 ];
@@ -25,26 +34,19 @@ const DEFAULT_RETURNING_BLOCKS = [
 ];
 
 async function ensureFunnelSeeded(db: ReturnType<typeof supabaseAdmin>) {
-  const { data: existing } = await db
-    .from("funnel_versions")
-    .select("id")
-    .in("id", [NEW_USER_VERSION_ID, RETURNING_VERSION_ID]);
+  // Always upsert versions + delete/re-insert blocks so changes to DEFAULT_*_BLOCKS
+  // take effect immediately without manual DB intervention.
+  await db.from("funnel_versions").upsert([
+    { id: NEW_USER_VERSION_ID,  name: "OutX Default Funnel",          is_active: true },
+    { id: RETURNING_VERSION_ID, name: "OutX Returning User Funnel",   is_active: true },
+  ]);
 
-  const existingIds = new Set((existing ?? []).map((v) => v.id));
+  await db.from("funnel_blocks").delete().in("funnel_version_id", [NEW_USER_VERSION_ID, RETURNING_VERSION_ID]);
 
-  if (!existingIds.has(NEW_USER_VERSION_ID)) {
-    await db.from("funnel_versions").upsert({ id: NEW_USER_VERSION_ID, name: "OutX Default Funnel", is_active: true });
-    await db.from("funnel_blocks").insert(
-      DEFAULT_NEW_BLOCKS.map((b) => ({ ...b, funnel_version_id: NEW_USER_VERSION_ID }))
-    );
-  }
-
-  if (!existingIds.has(RETURNING_VERSION_ID)) {
-    await db.from("funnel_versions").upsert({ id: RETURNING_VERSION_ID, name: "OutX Returning User Funnel", is_active: true });
-    await db.from("funnel_blocks").insert(
-      DEFAULT_RETURNING_BLOCKS.map((b) => ({ ...b, funnel_version_id: RETURNING_VERSION_ID }))
-    );
-  }
+  await db.from("funnel_blocks").insert([
+    ...DEFAULT_NEW_BLOCKS.map((b)       => ({ ...b, funnel_version_id: NEW_USER_VERSION_ID })),
+    ...DEFAULT_RETURNING_BLOCKS.map((b) => ({ ...b, funnel_version_id: RETURNING_VERSION_ID })),
+  ]);
 }
 
 export async function GET() {
@@ -67,7 +69,7 @@ export async function GET() {
   // ── Load all raw events + users ───────────────────────────────────────────
 
   const [eventsRes, usersRes] = await Promise.all([
-    db.from("raw_events").select("distinct_id, event_name, occurred_at, properties"),
+    db.from("raw_events").select("distinct_id, event_name, occurred_at, properties").limit(100000),
     db.from("users").select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source"),
   ]);
 
@@ -190,19 +192,25 @@ export async function GET() {
 
   // ── Count devices at each funnel step ─────────────────────────────────────
 
-  // Sequential: each step requires ALL prior steps (used for new user funnel)
-  const buildSequentialSteps = (deviceList: string[], blockList: typeof newBlocks, hasFn: (did: string, i: number) => boolean) =>
-    blockList.map((block, i) => ({
+  // Sequential: each step requires ALL prior steps (used for new user funnel).
+  // Steps where ZERO devices have data are auto-skipped — this handles cases
+  // where events aren't tracked in Mixpanel (e.g. extension installs).
+  const buildSequentialSteps = (deviceList: string[], blockList: typeof newBlocks, hasFn: (did: string, i: number) => boolean) => {
+    // Pre-compute which steps have any data at all in this dataset
+    const stepHasData = blockList.map((_, i) => deviceList.some((d) => hasFn(d, i)));
+    return blockList.map((block, i) => ({
       key:         block.id,
       label:       block.name,
       count:       deviceList.filter((d) => {
         for (let j = 0; j <= i; j++) {
-          if (!hasFn(d, j)) return false;
+          // Only enforce the step if it has actual event data — skip empty steps
+          if (stepHasData[j] && !hasFn(d, j)) return false;
         }
         return true;
       }).length,
       description: `Devices that fired: ${(block.events as string[]).slice(0, 2).join(", ")}${(block.events as string[]).length > 2 ? "…" : ""}`,
     }));
+  };
 
   // Independent: each feature counted separately as % of base (used for returning user adoption bars)
   const buildIndependentSteps = (deviceList: string[], blockList: typeof newBlocks, hasFn: (did: string, i: number) => boolean) =>
