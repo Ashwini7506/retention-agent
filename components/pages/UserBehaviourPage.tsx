@@ -356,22 +356,42 @@ function StoryView({ user }: { user: UserRow }) {
   const lines = story.split("\n").map((l) => l.trim()).filter(Boolean);
   const isBullet = (l: string) => l.startsWith("•") || l.startsWith("-") || l.startsWith("*");
 
+  // Group consecutive bullets together so paragraphs and bullet groups are visually separated
+  type Block = { type: "paragraph"; text: string } | { type: "bullets"; items: string[] };
+  const blocks: Block[] = [];
+  for (const line of lines) {
+    if (isBullet(line)) {
+      const text = line.replace(/^[•\-*]\s*/, "");
+      const last = blocks[blocks.length - 1];
+      if (last?.type === "bullets") {
+        last.items.push(text);
+      } else {
+        blocks.push({ type: "bullets", items: [text] });
+      }
+    } else {
+      blocks.push({ type: "paragraph", text: line });
+    }
+  }
+
   return (
-    <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4 space-y-1.5">
-      {lines.map((line, i) => {
-        if (isBullet(line)) {
-          const text = line.replace(/^[•\-*]\s*/, "");
+    <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4 space-y-3">
+      {blocks.map((block, i) => {
+        if (block.type === "paragraph") {
           return (
-            <div key={i} className="flex items-start gap-2">
-              <span className="text-indigo-500 mt-1 shrink-0 text-xs">•</span>
-              <span className="text-sm text-zinc-300 leading-snug">{text}</span>
-            </div>
+            <p key={i} className="text-sm text-zinc-300 leading-relaxed">
+              {block.text}
+            </p>
           );
         }
         return (
-          <p key={i} className="text-xs text-zinc-500 font-medium uppercase tracking-wide pt-1">
-            {line}
-          </p>
+          <ul key={i} className="space-y-1.5">
+            {block.items.map((item, j) => (
+              <li key={j} className="flex items-start gap-2">
+                <span className="text-indigo-500 mt-1 shrink-0 text-xs">•</span>
+                <span className="text-sm text-zinc-300 leading-snug">{item}</span>
+              </li>
+            ))}
+          </ul>
         );
       })}
     </div>

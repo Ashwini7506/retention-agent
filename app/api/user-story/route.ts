@@ -313,24 +313,20 @@ ${activityLine}
       messages: [
         {
           role: "user",
-          content: `You are Sherlock Holmes reviewing a case file. Present your findings as short, punchy bullet points — one fact per line, no padding, no elaborate sentences. Think of it as reading notes off an index card.
+          content: `You are a sharp analyst writing a brief case note on a user. Write in a mix of short paragraphs and bullet points — not all bullets, not all prose. Think: 1-2 sentence paragraph to set the scene, then tight bullets for the details, then a closing sentence.
 
-Start with one line: "Data window: [start date] → [end date]"
-
-Then list the key facts, each as a short bullet. Cover:
-• When they first appeared and on what plan
-• Whether they installed the browser plugin — if yes, exact date and time
-• Each active day: date + number of actions + what they mainly did (e.g. "viewed LinkedIn watchlist 104×, logged in 3×")
-• Any notable features used — with counts
-• Last active date and total actions
+Structure:
+1. One short paragraph (2 sentences max): who they are, what plan they're on, when they first appeared. If they installed the browser plugin, include the exact date and time here.
+2. Bullet points — one per active day: date, total actions, and what they mainly did (e.g. "Viewed LinkedIn watchlist 30×, ran 3 prompts, logged in twice")
+3. One short paragraph (1-2 sentences): summary of their overall activity — what they used most, last seen, total actions. No predictions, no verdict.
 
 Rules:
-- One bullet = one fact. Keep each bullet under 15 words.
 - Use numbers, not words: "104×" not "one hundred and four times"
-- Plain English only — no jargon, no technical terms, no event names
-- Do NOT say "churn", "at risk", "funnel", "paywall", "modal", or make any prediction
-- Do NOT add a conclusion or recommendation — just the facts
-- If data is missing (e.g. no billing info), say so in one bullet: "Plan: Expert (no billing records available)"
+- Plain English only — no jargon, no technical event names
+- Do NOT say "churn", "at risk", "funnel", "paywall", or make any prediction
+- Do NOT add recommendations — just the facts
+- If plan or billing data is missing, say so plainly in the opening paragraph
+- Keep the whole thing under 180 words
 
 ${context}`,
         },
