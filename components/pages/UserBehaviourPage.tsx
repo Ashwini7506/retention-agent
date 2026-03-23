@@ -318,6 +318,98 @@ const CAT_BRANCH_COLORS: Record<string, { dot: string; label: string; line: stri
   Other:          { dot: "bg-zinc-600",    label: "text-zinc-500",    line: "border-zinc-800"      },
 };
 
+/* ─── Story builder ─────────────────────────────────────────────────────── */
+
+function buildStory(user: UserRow, journey: JourneyData) {
+  const allEvents = journey.days.flatMap((day) =>
+    day.events.map((ev) => ({ date: day.date, name: ev.name }))
+  );
+
+  const find = (test: (n: string) => boolean) => allEvents.find((e) => test(e.name));
+
+  const regEv     = find((n) => n.includes("Registered") || n.includes("Register Button"));
+  const extEv     = find((n) => n.includes("Installed"));
+  const watchEv   = find((n) => n.includes("Watchlist") || n.includes("Prompt"));
+  const paywallEv = find((n) => n.includes("Payment") && n.includes("View"));
+  const paidEv    = find((n) => n.includes("Checkout Completed") || n.includes("Trial Button"));
+
+  const milestones: { date: string; text: string; color: string }[] = [];
+  if (regEv)     milestones.push({ date: regEv.date,     text: "Signed up",                        color: "bg-indigo-500" });
+  if (extEv)     milestones.push({ date: extEv.date,     text: "Installed Chrome extension",       color: "bg-blue-500"   });
+  if (watchEv)   milestones.push({ date: watchEv.date,   text: "Used watchlist / prompts",         color: "bg-violet-500" });
+  if (paywallEv) milestones.push({ date: paywallEv.date, text: "Reached paywall",                  color: "bg-amber-500"  });
+  if (paidEv)    milestones.push({
+    date: paidEv.date,
+    text: paidEv.name.includes("Trial") ? "Started free trial" : "Completed payment",
+    color: "bg-emerald-500",
+  });
+
+  milestones.sort((a, b) => a.date.localeCompare(b.date));
+
+  if (user.last_seen) {
+    milestones.push({
+      date: user.last_seen,
+      text: user.days_since_last === 0 ? "Active today" : `Last active — ${user.days_since_last}d ago`,
+      color: user.days_since_last >= 3 ? "bg-rose-500" : "bg-zinc-500",
+    });
+  }
+
+  const firstName  = user.name !== "—" ? user.name.split(" ")[0] : "This user";
+  const signupDate = regEv ? formatDate(regEv.date) : (user.first_seen ? formatDate(user.first_seen) : "an unknown date");
+  const activeDays = journey.days.length;
+
+  let narrative = `${firstName} first appeared on ${signupDate}`;
+  if (user.plan !== "—") narrative += ` on a ${user.plan} plan`;
+  narrative += `. Active across ${activeDays} day${activeDays !== 1 ? "s" : ""} with ${user.total_events} events total. `;
+
+  if (paidEv) {
+    narrative += `Completed the full funnel and converted${paidEv.name.includes("Trial") ? " to a free trial" : " to a paid plan"}.`;
+  } else if (paywallEv) {
+    narrative += `Reached the paywall on ${formatDate(paywallEv.date)} but did not convert.`;
+  } else if (watchEv) {
+    narrative += `Engaged with the product — used watchlists and prompts — but never reached the paywall.`;
+  } else if (extEv) {
+    narrative += `Installed the extension but never set up a watchlist or ran a prompt.`;
+  } else {
+    narrative += `Never installed the Chrome extension.`;
+  }
+
+  if (user.days_since_last >= 5) {
+    narrative += ` Silent for ${user.days_since_last} days — strong churn signal.`;
+  } else if (user.days_since_last >= 3) {
+    narrative += ` Inactive for ${user.days_since_last} days.`;
+  } else if (user.days_since_last <= 1) {
+    narrative += ` Last seen very recently.`;
+  }
+
+  return { narrative, milestones };
+}
+
+function StoryView({ user, journey }: { user: UserRow; journey: JourneyData }) {
+  const { narrative, milestones } = buildStory(user, journey);
+  return (
+    <>
+      <div className="bg-zinc-900/60 border border-zinc-800/60 rounded-xl p-4">
+        <p className="text-sm text-zinc-300 leading-relaxed">{narrative}</p>
+      </div>
+      <div>
+        <p className="text-[10px] text-zinc-600 uppercase tracking-widest mb-3">Key Moments</p>
+        <div className="space-y-3">
+          {milestones.map((m, i) => (
+            <div key={i} className="flex items-start gap-3">
+              <span className="text-[11px] text-zinc-600 tabular-nums shrink-0 w-14 pt-0.5">
+                {m.date ? formatDate(m.date) : "—"}
+              </span>
+              <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${m.color}`} />
+              <span className="text-sm text-zinc-300">{m.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ─── Journey Modal ──────────────────────────────────────────────────────── */
 
 function JourneyModal({ user, onClose }: { user: UserRow; onClose: () => void }) {
@@ -412,8 +504,8 @@ function JourneyModal({ user, onClose }: { user: UserRow; onClose: () => void })
           </div>
         </div>
 
-        {/* Day-by-day journey */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+        {/* Story */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {loading && (
             <div className="flex items-center justify-center py-12">
               <div className="w-5 h-5 border-2 border-zinc-700 border-t-indigo-500 rounded-full animate-spin" />
@@ -426,52 +518,9 @@ function JourneyModal({ user, onClose }: { user: UserRow; onClose: () => void })
             </div>
           )}
 
-          {!loading && journey?.days.map((day, di) => {
-            // Group events by category
-            const groups: Record<string, { time: string; name: string }[]> = {};
-            for (const ev of day.events) {
-              const cat = ev.category || "Other";
-              if (!groups[cat]) groups[cat] = [];
-              groups[cat].push({ time: ev.time, name: ev.name });
-            }
-
-            return (
-              <div key={day.date}>
-                {/* Day header */}
-                <div className="flex items-center gap-3 mb-3">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${di === 0 ? "bg-indigo-400" : "bg-zinc-700"}`} />
-                  <span className="text-xs font-semibold text-zinc-300">{formatFullDate(day.date)}</span>
-                  <div className="flex-1 h-px bg-zinc-800/60" />
-                  <span className="text-[10px] text-zinc-700">{day.events.length} events</span>
-                </div>
-
-                {/* Category branches */}
-                <div className="ml-4 space-y-3 mb-1">
-                  {Object.entries(groups).map(([cat, evs]) => {
-                    const cfg = CAT_BRANCH_COLORS[cat] ?? CAT_BRANCH_COLORS["Other"];
-                    return (
-                      <div key={cat} className={`border-l-2 pl-3 ${cfg.line}`}>
-                        {/* Category label */}
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-                          <span className={`text-[10px] font-bold uppercase tracking-widest ${cfg.label}`}>{cat}</span>
-                        </div>
-                        {/* Events under this category */}
-                        <div className="space-y-0.5">
-                          {evs.map((ev, ei) => (
-                            <div key={ei} className="flex items-center gap-3 py-0.5 pl-1">
-                              <span className="text-[10px] text-zinc-700 tabular-nums shrink-0 w-9">{ev.time}</span>
-                              <span className="text-xs text-zinc-300">{readable(ev.name)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+          {!loading && journey && journey.days.length > 0 && (
+            <StoryView user={user} journey={journey} />
+          )}
         </div>
       </div>
     </div>
@@ -618,8 +667,8 @@ function UsersTable({
       </div>
 
       {/* Header */}
-      <div className="grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_auto] gap-4 px-4 py-2.5 border-b border-zinc-800/60">
-        {["Name", "Email", "Plan", "Risk", "Funnel Stage", "Churn Score", "Actions"].map((h) => (
+      <div className="grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_auto] gap-4 px-4 py-2.5 border-b border-zinc-800/60">
+        {["Name", "Email", "Plan", "Risk", "Churn Score", "Actions"].map((h) => (
           <span key={h} className="text-[10px] font-medium text-zinc-600 uppercase tracking-widest">{h}</span>
         ))}
       </div>
@@ -632,13 +681,12 @@ function UsersTable({
         {filtered.map((u) => (
           <div
             key={u.device_id}
-            className="grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_1.5fr_auto] gap-4 px-4 py-3 items-center hover:bg-zinc-800/30 transition-colors"
+            className="grid grid-cols-[2fr_2fr_1fr_1fr_1.5fr_auto] gap-4 px-4 py-3 items-center hover:bg-zinc-800/30 transition-colors"
           >
             <span className="text-sm text-zinc-200 truncate font-medium">{u.name}</span>
             <span className="text-xs text-zinc-500 truncate">{u.email}</span>
             <span className="text-xs text-zinc-400">{u.plan}</span>
             <RiskBadge risk={u.risk_level} />
-            <FunnelStagePill stage={u.funnel_stage} />
             <ScoreBar score={u.churn_score} risk={u.risk_level} />
             <div className="flex items-center gap-1.5">
               <button
