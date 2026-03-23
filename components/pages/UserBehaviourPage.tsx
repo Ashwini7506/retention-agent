@@ -611,11 +611,20 @@ function UsersTable({
 }) {
   const [riskFilter, setRiskFilter] = useState<RiskLevel | "all">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | "new" | "old">("all");
+  const [planFilter, setPlanFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+
+  const PLAN_FILTERS = ["all", "free", "growth", "pro", "expert", "ultimate"] as const;
+
+  const matchesPlan = (plan: string, filter: string) => {
+    if (filter === "all") return true;
+    return plan.toLowerCase().includes(filter);
+  };
 
   const filtered = users.filter((u) => {
     if (riskFilter !== "all" && u.risk_level !== riskFilter) return false;
     if (typeFilter !== "all" && u.user_type !== typeFilter) return false;
+    if (!matchesPlan(u.plan, planFilter)) return false;
     if (search) {
       const q = search.toLowerCase();
       return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
@@ -661,6 +670,23 @@ function UsersTable({
               }`}
             >
               {f === "all" ? "All Risk" : f === "critical" ? "Critical" : f === "at-risk" ? "At Risk" : "Healthy"}
+            </button>
+          ))}
+        </div>
+
+        {/* Plan filter */}
+        <div className="flex gap-1 flex-wrap">
+          {PLAN_FILTERS.map((f) => (
+            <button
+              key={f}
+              onClick={() => setPlanFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors capitalize ${
+                planFilter === f
+                  ? "bg-indigo-600 text-white"
+                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+              }`}
+            >
+              {f === "all" ? "All Plans" : f}
             </button>
           ))}
         </div>
