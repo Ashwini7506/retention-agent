@@ -108,10 +108,22 @@ export async function GET(request: Request) {
     }
   }
 
-  const { data: usersData } = await db
-    .from("users")
-    .select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source")
-    .range(0, 9999);
+  // Paginate users table — same PostgREST 1000-row cap applies
+  const usersData: Array<{ distinct_id: string; name: string; email: string; city: string; country: string; utm_source: string; plan_type: string; acquisition_source: string }> = [];
+  {
+    const PAGE = 1000;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await db
+        .from("users")
+        .select("distinct_id, name, email, city, country, utm_source, plan_type, acquisition_source")
+        .range(offset, offset + PAGE - 1);
+      if (error || !data || data.length === 0) break;
+      usersData.push(...data);
+      if (data.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
 
   // ── Build user profile lookup ─────────────────────────────────────────────
 
