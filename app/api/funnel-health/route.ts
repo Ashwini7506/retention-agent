@@ -156,13 +156,11 @@ export async function GET(request: Request) {
       retOffset += RET_PAGE;
     }
 
-    // ── New user funnel (sequential) ──────────────────────────────────────────
-    // Step 1: Signed Up (reached_signup)
-    // Step 2: Installed Extension (reached_extension) — independent metric
-    // Step 3: Used Watchlist/Prompt (reached_watchlist) — sequential from step 1
-    // Step 4: Reached Paywall (reached_paywall) — sequential
-    //
-    // Sequential: each step count = users who passed ALL prior non-empty steps.
+    // ── New user funnel (sequential — extension is mandatory for OutX) ───────────
+    // Signup → Extension → Watchlist/Prompt → Paywall
+    // Each stage is a strict subset of the previous.
+    // Note: users showing watchlist without extension = Mixpanel tracking gap
+    // (extension_page_extension_installed event not firing for all installs)
 
     const signedUp  = newSnapshots.filter((s) => s.reached_signup);
     const extended  = signedUp.filter((s) => s.reached_extension);
