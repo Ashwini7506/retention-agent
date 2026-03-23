@@ -151,8 +151,8 @@ export async function GET(request: Request) {
     // Sequential: each step count = users who passed ALL prior non-empty steps.
 
     const signedUp  = newSnapshots.filter((s) => s.reached_signup);
-    const extended  = newSnapshots.filter((s) => s.reached_extension);
-    const watchlist = signedUp.filter((s) => s.reached_watchlist);
+    const extended  = signedUp.filter((s) => s.reached_extension);
+    const watchlist = extended.filter((s) => s.reached_watchlist);
     const paywall   = watchlist.filter((s) => s.reached_paywall);
 
     const newUserFunnel = [
