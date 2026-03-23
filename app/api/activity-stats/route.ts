@@ -1,14 +1,12 @@
 import { supabaseAdmin } from "@/lib/supabase";
 
-// GET /api/activity-stats
-// Returns:
-//  - avg session duration per DAU (first→last event span per user, latest day)
-//  - avg prompt_flow_completed duration (from duration_seconds in properties)
-//  - event category breakdown (% of each category for DAU users today)
-//  - top active users by event count (for avatar stack)
-//  - DAU count
+export const dynamic = "force-dynamic";
 
-// Same in-app events as dashboard DAU so both numbers match
+// GET /api/activity-stats
+// Uses metrics_daily for headline numbers (instant) and keeps a small
+// single-day raw_events query for session/prompt durations and category
+// breakdown (only 1 day of events, ~1-2k rows — much faster than all 47k).
+
 const IN_APP = new Set([
   "viewed_dashboard_page", "extension_page_viewed", "extension_page_extension_installed",
   "ai_onboarding_modal_listen_screen_viewed", "ai_onboarding_modal_start_listening_clicked",
@@ -27,31 +25,39 @@ const IN_APP = new Set([
 export async function GET() {
   const db = supabaseAdmin();
 
-  // Find the most recent day with events
-  const { data: latestDay } = await db
-    .from("raw_events")
-    .select("occurred_at")
-    .order("occurred_at", { ascending: false })
+  // ── Get the most recent day from metrics_daily (instant) ───────────────────
+  const { data: latest, error: e1 } = await db
+    .from("metrics_daily")
+    .select("*")
+    .order("date", { ascending: false })
     .limit(1)
     .single();
 
-  if (!latestDay) {
+  if (e1 || !latest) {
     return Response.json({
       avg_session_minutes: null,
-      avg_prompt_seconds: null,
-      dau: 0,
-      top_users: [],
-      category_breakdown: [],
+      avg_prompt_seconds:  null,
+      dau:                 0,
+      top_users:           [],
+      category_breakdown:  [],
     });
   }
 
-  // Get all events on the most recent day
-  const latestDate = latestDay.occurred_at.slice(0, 10); // "YYYY-MM-DD"
-  const dayStart = `${latestDate}T00:00:00`;
-  const dayEnd = `${latestDate}T23:59:59`;
+  const latestDate = latest.date as string; // "YYYY-MM-DD"
+  const dau        = (latest as { dau: number }).dau;
 
-  // Paginate — PostgREST 1000-row cap blocks single queries
-  const rawEvs: Array<{ distinct_id: string; event_name: string; occurred_at: string; event_category: string; properties: unknown }> = [];
+  // ── Fetch only the latest day's raw events (small — 1-2k rows typically) ───
+  const dayStart = `${latestDate}T00:00:00`;
+  const dayEnd   = `${latestDate}T23:59:59`;
+
+  const rawEvs: Array<{
+    distinct_id:    string;
+    event_name:     string;
+    occurred_at:    string;
+    event_category: string;
+    properties:     unknown;
+  }> = [];
+
   {
     const PAGE = 1000;
     let offset = 0;
@@ -70,10 +76,10 @@ export async function GET() {
     }
   }
 
-  // Resolve device_id: identified users group by distinct_id, anonymous by Device ID
+  // Resolve device_id
   const evs = rawEvs.map((e) => {
     const p: Record<string, string> = e.properties
-      ? typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties
+      ? typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties as Record<string, string>
       : {};
     const device_id = e.distinct_id.startsWith("$device:")
       ? (p["Device ID"] || e.distinct_id).trim()
@@ -81,61 +87,52 @@ export async function GET() {
     return { ...e, device_id };
   });
 
-  // DAU = distinct resolved device_ids with in-app events (matches dashboard DAU tile)
-  const userSet = new Set(evs.filter((e) => IN_APP.has(e.event_name)).map((e) => e.device_id));
-  const dau = userSet.size;
-
-  // Avg session duration: for each user, span = max(occurred_at) - min(occurred_at)
-  const userTimes: Record<string, { min: number; max: number; count: number }> = {};
+  // ── Avg session duration ────────────────────────────────────────────────────
+  const userTimes: Record<string, { min: number; max: number }> = {};
   for (const e of evs) {
     const t = new Date(e.occurred_at).getTime();
     if (!userTimes[e.device_id]) {
-      userTimes[e.device_id] = { min: t, max: t, count: 0 };
+      userTimes[e.device_id] = { min: t, max: t };
     }
     if (t < userTimes[e.device_id].min) userTimes[e.device_id].min = t;
     if (t > userTimes[e.device_id].max) userTimes[e.device_id].max = t;
-    userTimes[e.device_id].count++;
   }
 
   const sessionSpans = Object.values(userTimes)
-    .map((u) => (u.max - u.min) / 1000 / 60) // minutes
-    .filter((mins) => mins > 0); // exclude single-event sessions
+    .map((u) => (u.max - u.min) / 1000 / 60)
+    .filter((mins) => mins > 0);
 
   const avgSessionMinutes =
     sessionSpans.length > 0
       ? parseFloat((sessionSpans.reduce((a, b) => a + b, 0) / sessionSpans.length).toFixed(1))
       : null;
 
-  // Avg prompt_flow_completed duration from properties
-  const promptEvents = evs.filter((e) => e.event_name === "prompt_flow_completed");
+  // ── Avg prompt_flow_completed duration ─────────────────────────────────────
   const promptDurations: number[] = [];
-  for (const e of promptEvents) {
-    let sec: number | null = null;
-    if (e.properties) {
-      const props = typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties;
-      if (props.duration_seconds) sec = Number(props.duration_seconds);
-      else if (props.duration_ms) sec = Number(props.duration_ms) / 1000;
-    }
-    if (sec !== null && sec > 0) promptDurations.push(sec);
+  for (const e of evs.filter((e) => e.event_name === "prompt_flow_completed")) {
+    const props = e.properties
+      ? typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties as Record<string, unknown>
+      : {};
+    if ((props as Record<string, unknown>).duration_seconds) promptDurations.push(Number((props as Record<string, unknown>).duration_seconds));
+    else if ((props as Record<string, unknown>).duration_ms) promptDurations.push(Number((props as Record<string, unknown>).duration_ms) / 1000);
   }
 
-  // If no prompt events on this day, query all-time
+  // If no prompts today, query all-time (still fast — small table)
   let avgPromptSeconds: number | null = null;
   if (promptDurations.length > 0) {
     avgPromptSeconds = parseFloat(
       (promptDurations.reduce((a, b) => a + b, 0) / promptDurations.length).toFixed(0)
     );
   } else {
-    // All-time prompt durations
     const { data: allPrompts } = await db
       .from("raw_events")
       .select("properties")
       .eq("event_name", "prompt_flow_completed")
       .limit(100000);
     for (const e of allPrompts ?? []) {
-      const props = typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties;
+      const props = typeof e.properties === "string" ? JSON.parse(e.properties) : e.properties as Record<string, unknown>;
       if (props?.duration_seconds) promptDurations.push(Number(props.duration_seconds));
-      else if (props?.duration_ms) promptDurations.push(Number(props.duration_ms) / 1000);
+      else if (props?.duration_ms)  promptDurations.push(Number(props.duration_ms) / 1000);
     }
     if (promptDurations.length > 0) {
       avgPromptSeconds = parseFloat(
@@ -144,7 +141,7 @@ export async function GET() {
     }
   }
 
-  // Category breakdown (% of events by category)
+  // ── Category breakdown ──────────────────────────────────────────────────────
   const catCounts: Record<string, number> = {};
   for (const e of evs) {
     const cat = e.event_category ?? "Other";
@@ -152,13 +149,13 @@ export async function GET() {
   }
   const total = evs.length || 1;
   const CATEGORY_COLORS: Record<string, string> = {
-    Extension: "bg-indigo-500",
-    Activation: "bg-violet-500",
-    Onboarding: "bg-blue-500",
-    Payment: "bg-emerald-500",
+    Extension:      "bg-indigo-500",
+    Activation:     "bg-violet-500",
+    Onboarding:     "bg-blue-500",
+    Payment:        "bg-emerald-500",
     Authentication: "bg-amber-400",
-    "Page Views": "bg-zinc-500",
-    Other: "bg-zinc-700",
+    "Page Views":   "bg-zinc-500",
+    Other:          "bg-zinc-700",
   };
   const category_breakdown = Object.entries(catCounts)
     .sort(([, a], [, b]) => b - a)
@@ -169,7 +166,7 @@ export async function GET() {
       color: CATEGORY_COLORS[label] ?? "bg-zinc-600",
     }));
 
-  // Top active users by event count (for avatar stack)
+  // ── Top users by event count ────────────────────────────────────────────────
   const userEventCount: Record<string, number> = {};
   for (const e of evs) {
     userEventCount[e.device_id] = (userEventCount[e.device_id] ?? 0) + 1;
@@ -178,15 +175,15 @@ export async function GET() {
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5)
     .map(([device_id, count]) => ({
-      id: device_id,
-      initials: device_id.slice(0, 2).toUpperCase(),
+      id:          device_id,
+      initials:    device_id.slice(0, 2).toUpperCase(),
       event_count: count,
     }));
 
   return Response.json({
-    date: latestDate,
+    date:                latestDate,
     avg_session_minutes: avgSessionMinutes,
-    avg_prompt_seconds: avgPromptSeconds,
+    avg_prompt_seconds:  avgPromptSeconds,
     dau,
     top_users,
     category_breakdown,
