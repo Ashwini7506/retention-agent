@@ -36,12 +36,21 @@ type DashboardData = {
   };
 };
 
+type DauUser = {
+  device_id: string;
+  name: string | null;
+  email: string | null;
+  event_count: number;
+  session_minutes: number;
+};
+
 type ActivityStats = {
   date: string | null;
   avg_session_minutes: number | null;
   avg_prompt_seconds: number | null;
   dau: number;
   top_users: { id: string; initials: string; event_count: number }[];
+  dau_users: DauUser[];
   category_breakdown: { label: string; value: number; color: string }[];
   total_events: number;
 };
@@ -195,6 +204,71 @@ function WindowBanner({ day, start }: { day: number; start: string | null }) {
   );
 }
 
+/* ─── DAU users table ───────────────────────────────────────────────────── */
+
+const DauUsersTable: FC<{ users: DauUser[]; date: string | null }> = ({ users, date }) => {
+  const dateStr = date
+    ? new Date(date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    : "Latest day";
+
+  return (
+    <Card className="bg-zinc-900 border-zinc-800">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium text-zinc-300">
+            Daily Active Users — {dateStr}
+          </CardTitle>
+          <span className="text-xs text-zinc-500">{users.length} users</span>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-auto max-h-[480px]">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-zinc-900 border-b border-zinc-800">
+              <tr>
+                <th className="text-left px-4 py-2 text-zinc-500 font-medium w-8">#</th>
+                <th className="text-left px-4 py-2 text-zinc-500 font-medium">User</th>
+                <th className="text-right px-4 py-2 text-zinc-500 font-medium">Events</th>
+                <th className="text-right px-4 py-2 text-zinc-500 font-medium">Session Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u, i) => {
+                const display = u.email ?? u.name ?? u.device_id;
+                const initials = (u.name ?? u.email ?? u.device_id).slice(0, 2).toUpperCase();
+                const sessionLabel = u.session_minutes === 0
+                  ? "< 1s"
+                  : u.session_minutes < 1
+                    ? `${Math.round(u.session_minutes * 60)}s`
+                    : `${u.session_minutes.toFixed(1)} min`;
+                return (
+                  <tr key={u.device_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors">
+                    <td className="px-4 py-2.5 text-zinc-600">{i + 1}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-[10px] font-semibold text-zinc-300 shrink-0">
+                          {initials}
+                        </div>
+                        <span className="text-zinc-300 truncate max-w-[220px]">{display}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-400">{u.event_count}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <span className={`font-medium ${u.session_minutes >= 10 ? "text-emerald-400" : u.session_minutes >= 2 ? "text-amber-400" : "text-zinc-500"}`}>
+                        {sessionLabel}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 /* ─── Main dashboard ────────────────────────────────────────────────────── */
 
 export default function DashboardPage() {
@@ -326,6 +400,11 @@ export default function DashboardPage() {
           date={activity?.date ?? null}
           onViewFunnel={onViewFunnel}
         />
+
+        {/* DAU users table */}
+        {activity?.dau_users && activity.dau_users.length > 0 && (
+          <DauUsersTable users={activity.dau_users} date={activity.date ?? null} />
+        )}
 
       </div>
     </div>

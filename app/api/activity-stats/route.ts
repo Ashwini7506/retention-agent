@@ -180,12 +180,44 @@ export async function GET() {
       event_count: count,
     }));
 
+  // ── All DAU users with session time ────────────────────────────────────────
+  const allDeviceIds = Object.keys(userEventCount);
+
+  // Fetch name + email from user_snapshots for these device IDs
+  const { data: snapRows } = await db
+    .from("user_snapshots")
+    .select("distinct_id, name, email")
+    .in("distinct_id", allDeviceIds);
+
+  const snapById: Record<string, { name: string | null; email: string | null }> = {};
+  for (const row of snapRows ?? []) {
+    snapById[row.distinct_id] = { name: row.name, email: row.email };
+  }
+
+  const dau_users = Object.entries(userEventCount)
+    .sort(([, a], [, b]) => b - a)
+    .map(([device_id, event_count]) => {
+      const span = userTimes[device_id];
+      const session_minutes = span
+        ? parseFloat(((span.max - span.min) / 1000 / 60).toFixed(1))
+        : 0;
+      const snap = snapById[device_id];
+      return {
+        device_id,
+        name:            snap?.name  ?? null,
+        email:           snap?.email ?? null,
+        event_count,
+        session_minutes,
+      };
+    });
+
   return Response.json({
     date:                latestDate,
     avg_session_minutes: avgSessionMinutes,
     avg_prompt_seconds:  avgPromptSeconds,
     dau,
     top_users,
+    dau_users,
     category_breakdown,
     total_events: evs.length,
   });
