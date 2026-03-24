@@ -22,6 +22,39 @@ const IN_APP = new Set([
   "post_onboarding_modal_billing_screen_shown",
 ]);
 
+const REGISTRATION = new Set([
+  "user_registered",
+  "Register Button Clicked",
+  "google_signup_button_clicked_register_page",
+  "submit_button_clicked_register_page",
+  "register_page_otp_sent",
+]);
+
+// Session gap threshold: 30 minutes of inactivity = new session
+const SESSION_GAP_MS = 30 * 60 * 1000;
+
+/** Compute total session minutes for a user given sorted event timestamps.
+ *  Groups consecutive events with < 30 min gap into one session.
+ *  Sessions with only a single event contribute 0 duration.
+ */
+function computeSessionMinutes(sortedTs: number[]): number {
+  if (sortedTs.length === 0) return 0;
+  let totalMs = 0;
+  let sessionStart = sortedTs[0];
+  let prev = sortedTs[0];
+  for (let i = 1; i < sortedTs.length; i++) {
+    const gap = sortedTs[i] - prev;
+    if (gap > SESSION_GAP_MS) {
+      // session ended at prev
+      totalMs += prev - sessionStart;
+      sessionStart = sortedTs[i];
+    }
+    prev = sortedTs[i];
+  }
+  totalMs += prev - sessionStart;
+  return parseFloat((totalMs / 1000 / 60).toFixed(1));
+}
+
 export async function GET() {
   const db = supabaseAdmin();
 
@@ -87,24 +120,28 @@ export async function GET() {
     return { ...e, device_id };
   });
 
-  // ── Avg session duration ────────────────────────────────────────────────────
-  const userTimes: Record<string, { min: number; max: number }> = {};
-  for (const e of evs) {
+  // Only in-app + registration events count as DAU (mirrors snapshots.py definition)
+  const dauEvs = evs.filter((e) => IN_APP.has(e.event_name) || REGISTRATION.has(e.event_name));
+
+  // ── Avg session duration (session-gap approach) ─────────────────────────────
+  // Collect sorted timestamps per DAU user from in-app events only
+  const userTimestamps: Record<string, number[]> = {};
+  for (const e of dauEvs) {
     const t = new Date(e.occurred_at).getTime();
-    if (!userTimes[e.device_id]) {
-      userTimes[e.device_id] = { min: t, max: t };
-    }
-    if (t < userTimes[e.device_id].min) userTimes[e.device_id].min = t;
-    if (t > userTimes[e.device_id].max) userTimes[e.device_id].max = t;
+    if (!userTimestamps[e.device_id]) userTimestamps[e.device_id] = [];
+    userTimestamps[e.device_id].push(t);
+  }
+  for (const id of Object.keys(userTimestamps)) {
+    userTimestamps[id].sort((a, b) => a - b);
   }
 
-  const sessionSpans = Object.values(userTimes)
-    .map((u) => (u.max - u.min) / 1000 / 60)
-    .filter((mins) => mins > 0);
+  const sessionMinsPerUser = Object.entries(userTimestamps)
+    .map(([id, ts]) => ({ id, mins: computeSessionMinutes(ts) }));
 
+  const nonZeroSessions = sessionMinsPerUser.filter((u) => u.mins > 0);
   const avgSessionMinutes =
-    sessionSpans.length > 0
-      ? parseFloat((sessionSpans.reduce((a, b) => a + b, 0) / sessionSpans.length).toFixed(1))
+    nonZeroSessions.length > 0
+      ? parseFloat((nonZeroSessions.reduce((s, u) => s + u.mins, 0) / nonZeroSessions.length).toFixed(1))
       : null;
 
   // ── Avg prompt_flow_completed duration ─────────────────────────────────────
@@ -166,9 +203,9 @@ export async function GET() {
       color: CATEGORY_COLORS[label] ?? "bg-zinc-600",
     }));
 
-  // ── Top users by event count ────────────────────────────────────────────────
+  // ── Top users by in-app event count ────────────────────────────────────────
   const userEventCount: Record<string, number> = {};
-  for (const e of evs) {
+  for (const e of dauEvs) {
     userEventCount[e.device_id] = (userEventCount[e.device_id] ?? 0) + 1;
   }
   const top_users = Object.entries(userEventCount)
@@ -194,20 +231,21 @@ export async function GET() {
     snapById[row.distinct_id] = { name: row.name, email: row.email };
   }
 
+  const sessionMinsById: Record<string, number> = {};
+  for (const { id, mins } of sessionMinsPerUser) {
+    sessionMinsById[id] = mins;
+  }
+
   const dau_users = Object.entries(userEventCount)
     .sort(([, a], [, b]) => b - a)
     .map(([device_id, event_count]) => {
-      const span = userTimes[device_id];
-      const session_minutes = span
-        ? parseFloat(((span.max - span.min) / 1000 / 60).toFixed(1))
-        : 0;
       const snap = snapById[device_id];
       return {
         device_id,
         name:            snap?.name  ?? null,
         email:           snap?.email ?? null,
         event_count,
-        session_minutes,
+        session_minutes: sessionMinsById[device_id] ?? 0,
       };
     });
 
