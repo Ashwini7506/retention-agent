@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 // GET /api/funnel-health
 // Reads from pre-computed user_snapshots table instead of paginating raw_events.
-// Query params: ?from=YYYY-MM-DD&to=YYYY-MM-DD (IST dates from UI)
+// Query params: ?from=YYYY-MM-DD&to=YYYY-MM-DD
 
 // ── Funnel block definitions (same as before — kept here for label generation) ─
 
@@ -108,15 +108,13 @@ export async function GET(request: Request) {
   try {
     const db = supabaseAdmin();
 
-    // ── Date filter (UI sends IST dates) ──────────────────────────────────────
+    // ── Date filter ───────────────────────────────────────────────────────────
     const { searchParams } = new URL(request.url);
     const fromDate = searchParams.get("from");
     const toDate   = searchParams.get("to");
 
-    // signup_date and last_seen are plain UTC dates (stored as YYYY-MM-DD from
-    // occurred_at[:10] in snapshots.py). Use the UI dates directly — no IST
-    // offset — so that each calendar day maps to exactly one UTC date bucket
-    // and ranges are strictly additive (no overlap between adjacent days).
+    // Dates used as-is — no timezone conversion. Mixpanel timestamps are stored
+    // as UTC dates and the UI dates map directly to them.
     const fromUTC = fromDate ?? "2000-01-01";
     const toUTC   = toDate   ?? "2099-12-31";
 

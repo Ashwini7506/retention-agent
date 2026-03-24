@@ -234,8 +234,8 @@ function AssumptionsList() {
       flag: "Dedup",
     },
     {
-      title: "IST → UTC conversion",
-      body: "The UI sends IST dates. The funnel-health API subtracts 5.5 hours so March 6 00:00 IST maps to March 5 18:30 UTC, catching all events that belong to March 6 in India.",
+      title: "Dates are used as-is from Mixpanel",
+      body: "signup_date and last_seen are stored as UTC dates directly from Mixpanel timestamps. No IST offset is applied — dates in the UI map 1:1 to what Mixpanel recorded.",
       flag: "Timezone",
     },
     {
