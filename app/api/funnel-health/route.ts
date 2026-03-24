@@ -14,7 +14,9 @@ const RETURNING_VERSION_ID = "a1b2c3d4-0000-0000-0000-000000000004";
 const DEFAULT_NEW_BLOCKS = [
   { step_order: 1, name: "Signed Up",               id: "new-0", funnel_version_id: NEW_USER_VERSION_ID,  events: ["user_registered"] },
   { step_order: 2, name: "Installed Extension",      id: "new-1", funnel_version_id: NEW_USER_VERSION_ID,  events: ["extension_page_extension_installed"] },
-  { step_order: 3, name: "Used Watchlist / Prompt",  id: "new-2", funnel_version_id: NEW_USER_VERSION_ID,  events: ["prompt_flow_completed","prompt_loading_modal_shown","viewed_watchlist_details_page","viewed_reddit_watchlist_details_page","viewed_lists_page","watchlist_sidebar_clicked","filter_label_used","filter_show_interactions_used","filter_posted_date_used"] },
+  // Intentional actions only — page views and modal-shown events auto-fire
+  // during onboarding and inflate the count. Only clicks/completions count.
+  { step_order: 3, name: "Used Watchlist / Prompt",  id: "new-2", funnel_version_id: NEW_USER_VERSION_ID,  events: ["prompt_flow_completed","watchlist_sidebar_clicked","filter_label_used","filter_show_interactions_used","filter_posted_date_used"] },
   { step_order: 4, name: "Reached Paywall",          id: "new-3", funnel_version_id: NEW_USER_VERSION_ID,  events: ["payment_modal_modal_viewed","payment_modal_plan_viewed","payment_modal_payment_button_clicked","payment_modal_trial_button_clicked","payment_modal_checkout_completed","ai_onboarding_modal_billing_screen_shown","post_onboarding_modal_billing_screen_shown"] },
 ];
 
@@ -111,15 +113,12 @@ export async function GET(request: Request) {
     const fromDate = searchParams.get("from");
     const toDate   = searchParams.get("to");
 
-    // IST midnight = UTC 18:30 the previous day. Convert so we catch all UTC
-    // events that correspond to the IST date range the user selected.
-    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-    const fromUTC = fromDate
-      ? new Date(new Date(`${fromDate}T00:00:00.000Z`).getTime() - IST_OFFSET_MS).toISOString().slice(0, 10)
-      : "2000-01-01";
-    const toUTC = toDate
-      ? new Date(new Date(`${toDate}T23:59:59.999Z`).getTime() - IST_OFFSET_MS).toISOString().slice(0, 10)
-      : "2099-12-31";
+    // signup_date and last_seen are plain UTC dates (stored as YYYY-MM-DD from
+    // occurred_at[:10] in snapshots.py). Use the UI dates directly — no IST
+    // offset — so that each calendar day maps to exactly one UTC date bucket
+    // and ranges are strictly additive (no overlap between adjacent days).
+    const fromUTC = fromDate ?? "2000-01-01";
+    const toUTC   = toDate   ?? "2099-12-31";
 
     // ── New users: have a registration event (user_type = 'new') ─────────────
     // and their signup fell within the selected date range
