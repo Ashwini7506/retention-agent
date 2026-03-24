@@ -12,10 +12,18 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const cookie  = request.cookies.get("fm_access")?.value;
-  const correct = process.env.ACCESS_PASSWORD;
+  const email    = process.env.FUNNELMIND_EMAIL;
+  const password = process.env.FUNNELMIND_PASSWORD;
 
-  if (!correct || cookie !== correct) {
+  if (!email || !password) {
+    // Env vars not set — block access
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  const expectedToken = Buffer.from(`${email}:${password}`).toString("base64");
+  const cookie        = request.cookies.get("fm_session")?.value;
+
+  if (cookie !== expectedToken) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
