@@ -80,8 +80,11 @@ export async function GET() {
   const dau        = (latest as { dau: number }).dau;
 
   // ── Fetch only the latest day's raw events (small — 1-2k rows typically) ───
-  const dayStart = `${latestDate}T00:00:00`;
-  const dayEnd   = `${latestDate}T23:59:59`;
+  // Explicit +00:00 so PostgreSQL treats boundaries as UTC, matching [:10] in snapshots.py
+  const dayStart = `${latestDate}T00:00:00+00:00`;
+  const nextDay  = new Date(latestDate + "T00:00:00Z");
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const dayEnd   = nextDay.toISOString().slice(0, 10) + "T00:00:00+00:00";
 
   const rawEvs: Array<{
     distinct_id:    string;
@@ -99,7 +102,7 @@ export async function GET() {
         .from("raw_events")
         .select("distinct_id, event_name, occurred_at, event_category, properties")
         .gte("occurred_at", dayStart)
-        .lte("occurred_at", dayEnd)
+        .lt("occurred_at", dayEnd)
         .range(offset, offset + PAGE - 1);
       if (error) return Response.json({ error: error.message }, { status: 500 });
       if (!data || data.length === 0) break;
