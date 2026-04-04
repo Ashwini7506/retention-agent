@@ -47,6 +47,16 @@ export default function LandingPage() {
             </Link>
           </div>
 
+          {/* Loom Demo */}
+          <div className="mt-14 w-full rounded-2xl overflow-hidden border border-zinc-800 shadow-2xl shadow-indigo-950/30" style={{ position: "relative", paddingBottom: "62.5%", height: 0 }}>
+            <iframe
+              src="https://www.loom.com/embed/c2c11adca2c74eba877fa96101109b62"
+              frameBorder="0"
+              allowFullScreen
+              style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
+            />
+          </div>
+
           {/* Feature grid */}
           <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
             {[
